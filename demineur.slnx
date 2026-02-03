@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="demineur/demineur.vcxproj" />
+  <Project Path="demineur/demineur.vcxproj" Id="cb97d64a-4955-47a5-acd4-6f02829d7815" />
 </Solution>

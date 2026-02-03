@@ -6,6 +6,9 @@
 #include <random>
 #include <chrono>
 #include <cmath>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "msimg32.lib") // ? Pour GradientFill
 
 #define MAX_LOADSTRING 100
 
@@ -79,6 +82,48 @@ enum Theme {
     THEME_SUNSET = 4
 };
 
+// ?? QUALITÉ GRAPHIQUE ??
+enum GraphicsQuality {
+    QUALITY_MINIMAL = 0,      // Très Faible - Performance maximale
+    QUALITY_LOW = 1,          // Faible - Bon pour PC anciens
+    QUALITY_MEDIUM = 2,       // Moyen - Équilibré (par défaut)
+    QUALITY_HIGH = 3,         // Élevé - Qualité supérieure
+    QUALITY_ULTRA = 4         // Ultra - Maximum de détails
+};
+
+struct QualitySettings {
+    bool particlesEnabled;
+    bool animationsEnabled;
+    int menuParticleCount;
+    int gameParticleCount;
+    int menuBlurLayers;
+    int titleGlowLayers;
+    int buttonAuraLayers;
+    int waveCount;
+    int starCount;
+    int cellEffects;           // 0=minimal, 1=normal, 2=max
+    bool backgroundAnimations;
+    const wchar_t* description;
+};
+
+// Paramètres par niveau de qualité
+const QualitySettings QUALITY_PRESETS[] = {
+    // MINIMAL - Performance maximale
+    {false, false, 0, 0, 0, 1, 1, 1, 5, 0, false, L"Performance maximale"},
+    
+    // LOW - Faible
+    {true, false, 15, 10, 1, 2, 1, 2, 8, 0, false, L"Bon pour PC anciens"},
+    
+    // MEDIUM - Équilibré (par défaut)
+    {true, true, 30, 20, 2, 3, 2, 3, 15, 1, true, L"Équilibré qualité/performance"},
+    
+    // HIGH - Qualité supérieure
+    {true, true, 40, 25, 2, 4, 3, 3, 15, 2, true, L"Qualité supérieure"},
+    
+    // ULTRA - Maximum
+    {true, true, 50, 30, 3, 5, 3, 5, 30, 2, true, L"Maximum de détails"}
+};
+
 // État d'une cellule
 enum CellState {
     HIDDEN,
@@ -129,6 +174,31 @@ struct GameConfig {
     Theme currentTheme;
     GameMode gameMode;
     float zoomLevel;
+    int musicVolume;      // 0-100
+    int sfxVolume;        // 0-100
+    GraphicsQuality graphicsQuality;  // ?? Qualité graphique
+};
+
+// Types de sons
+enum SoundEffect {
+    SFX_CLICK,
+    SFX_REVEAL,
+    SFX_FLAG,
+    SFX_EXPLOSION,
+    SFX_WIN,
+    SFX_LOSE,
+    SFX_HINT,
+    SFX_COMBO,
+    SFX_BUTTON_HOVER,
+    SFX_BUTTON_CLICK,
+    SFX_COUNT
+};
+
+enum MusicTrack {
+    MUSIC_MENU,
+    MUSIC_GAME,
+    MUSIC_WIN,
+    MUSIC_COUNT
 };
 
 // Variables globales
@@ -147,6 +217,16 @@ static HPEN g_penDarkGray = NULL;
 static HPEN g_penBlack = NULL;
 static HFONT g_fontDigital = NULL;
 static HFONT g_fontCell = NULL;
+
+// ? CACHE ÉTENDU POUR PERFORMANCE ?
+static HBRUSH g_cachedBrushes[256] = {NULL}; // Cache de 256 brushes réutilisables
+static HPEN g_cachedPens[64] = {NULL};       // Cache de 64 pens réutilisables
+static int g_brushCacheSize = 0;
+static int g_penCacheSize = 0;
+
+// Cache pour les dégradés (pré-calculés)
+static HBITMAP g_gradientCache[10] = {NULL};
+static bool g_gradientCacheInitialized = false;
 
 // État du jeu
 enum GameState {
@@ -172,7 +252,7 @@ GameState gameState = STATE_MENU;
 // Variables avancées
 std::vector<Particle> particles;
 GameStats playerStats = {0};
-GameConfig gameConfig = {true, true, true, false, true, THEME_DARK, CLASSIC, 1.0f};
+GameConfig gameConfig = {true, true, true, false, true, THEME_DARK, CLASSIC, 1.0f, 70, 80, QUALITY_MEDIUM}; // ?? Medium par défaut
 int hintsRemaining = MAX_HINTS;
 std::vector<std::pair<int, int>> moveHistory;
 bool showingHint = false;
@@ -183,6 +263,10 @@ bool isPaused = false;
 float cellHoverX = -1, cellHoverY = -1;
 int lastRevealedCount = 0;
 
+// Variables audio
+MusicTrack currentMusic = MUSIC_COUNT;
+bool isMusicPlaying = false;
+
 // Variables pour le menu animé
 float menuAnimationTime = 0.0f;
 std::vector<Particle> menuParticles;
@@ -192,6 +276,69 @@ const int MAX_MENU_PARTICLES = 50;
 float gameBackgroundTime = 0.0f;
 std::vector<Particle> gameBackgroundParticles;
 const int MAX_BACKGROUND_PARTICLES = 30;
+
+// ? FONCTIONS OPTIMISÉES POUR CACHE GDI ?
+
+// Obtenir un brush depuis le cache (ou créer si nécessaire)
+HBRUSH GetCachedBrush(COLORREF color) {
+    // Recherche dans le cache
+    for (int i = 0; i < g_brushCacheSize; i++) {
+        if (g_cachedBrushes[i]) {
+            LOGBRUSH lb;
+            GetObject(g_cachedBrushes[i], sizeof(LOGBRUSH), &lb);
+            if (lb.lbColor == color) {
+                return g_cachedBrushes[i];
+            }
+        }
+    }
+    
+    // Créer nouveau brush et l'ajouter au cache
+    if (g_brushCacheSize < 256) {
+        g_cachedBrushes[g_brushCacheSize] = CreateSolidBrush(color);
+        return g_cachedBrushes[g_brushCacheSize++];
+    }
+    
+    // Cache plein, créer temporairement (rare)
+    return CreateSolidBrush(color);
+}
+
+// Obtenir un pen depuis le cache
+HPEN GetCachedPen(int width, COLORREF color) {
+    // Recherche simplifiée
+    for (int i = 0; i < g_penCacheSize; i++) {
+        if (g_cachedPens[i]) {
+            LOGPEN lp;
+            GetObject(g_cachedPens[i], sizeof(LOGPEN), &lp);
+            if (lp.lopnColor == color && lp.lopnWidth.x == width) {
+                return g_cachedPens[i];
+            }
+        }
+    }
+    
+    // Créer nouveau pen
+    if (g_penCacheSize < 64) {
+        g_cachedPens[g_penCacheSize] = CreatePen(PS_SOLID, width, color);
+        return g_cachedPens[g_penCacheSize++];
+    }
+    
+    return CreatePen(PS_SOLID, width, color);
+}
+
+// Vider le cache étendu
+void ClearExtendedCache() {
+    for (int i = 0; i < g_brushCacheSize; i++) {
+        if (g_cachedBrushes[i]) DeleteObject(g_cachedBrushes[i]);
+    }
+    for (int i = 0; i < g_penCacheSize; i++) {
+        if (g_cachedPens[i]) DeleteObject(g_cachedPens[i]);
+    }
+    for (int i = 0; i < 10; i++) {
+        if (g_gradientCache[i]) DeleteObject(g_gradientCache[i]);
+    }
+    g_brushCacheSize = 0;
+    g_penCacheSize = 0;
+    g_gradientCacheInitialized = false;
+}
 
 // Déclarations de fonctions
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -216,6 +363,14 @@ void DrawQuestion(HDC hdc, int x, int y, int size);
 void DrawGradientRect(HDC hdc, RECT rect, COLORREF color1, COLORREF color2, bool vertical);
 void InitGDICache();
 void CleanupGDICache();
+
+// Déclarations des fonctions audio
+void PlaySoundEffect(SoundEffect sfx);
+void PlayBackgroundMusic(MusicTrack track);
+void StopMusic();
+void SetMusicVolume(int volume);
+void SetSFXVolume(int volume);
+void ToggleAudio();
 
 // Stubs pour fonctions avancées - IMPLÉMENTATIONS RÉELLES
 void InitParticles() { 
@@ -290,7 +445,12 @@ void UpdateParticles() {
 void UpdateMenuParticles() {
     menuAnimationTime += 0.016f; // ~60 FPS
     
-    for (auto& p : menuParticles) {
+    // ? OPTIMISATION: Mettre à jour seulement 1 particule sur 2 à chaque frame
+    static int updateOffset = 0;
+    updateOffset = (updateOffset + 1) % 2;
+    
+    for (size_t i = updateOffset; i < menuParticles.size(); i += 2) {
+        auto& p = menuParticles[i];
         if (p.active) {
             // Mouvement sinusoïdal pour effet de flottement
             p.x += p.vx + sin(menuAnimationTime * 2.0f + p.y * 0.01f) * 0.2f;
@@ -301,10 +461,8 @@ void UpdateMenuParticles() {
             if (p.y < 0 || p.y > WINDOW_HEIGHT) p.vy *= -1;
             
             // Garder dans les limites
-            if (p.x < 0) p.x = 0;
-            if (p.x > WINDOW_WIDTH) p.x = (float)WINDOW_WIDTH;
-            if (p.y < 0) p.y = 0;
-            if (p.y > WINDOW_HEIGHT) p.y = (float)WINDOW_HEIGHT;
+            p.x = max(0.0f, min((float)WINDOW_WIDTH, p.x));
+            p.y = max(0.0f, min((float)WINDOW_HEIGHT, p.y));
         }
     }
 }
@@ -313,7 +471,12 @@ void UpdateMenuParticles() {
 void UpdateGameBackgroundParticles() {
     gameBackgroundTime += 0.016f; // ~60 FPS
     
-    for (auto& p : gameBackgroundParticles) {
+    // ? OPTIMISATION: Mettre à jour seulement 1 particule sur 2 à chaque frame
+    static int updateOffset = 0;
+    updateOffset = (updateOffset + 1) % 2;
+    
+    for (size_t i = updateOffset; i < gameBackgroundParticles.size(); i += 2) {
+        auto& p = gameBackgroundParticles[i];
         if (p.active) {
             // Mouvement lent et fluide
             p.x += p.vx + sin(gameBackgroundTime * 1.0f + p.y * 0.005f) * 0.3f;
@@ -324,10 +487,8 @@ void UpdateGameBackgroundParticles() {
             if (p.y < 0 || p.y > WINDOW_HEIGHT) p.vy *= -1;
             
             // Garder dans les limites
-            if (p.x < 0) p.x = 0;
-            if (p.x > WINDOW_WIDTH) p.x = (float)WINDOW_WIDTH;
-            if (p.y < 0) p.y = 0;
-            if (p.y > WINDOW_HEIGHT) p.y = (float)WINDOW_HEIGHT;
+            p.x = max(0.0f, min((float)WINDOW_WIDTH, p.x));
+            p.y = max(0.0f, min((float)WINDOW_HEIGHT, p.y));
         }
     }
 }
@@ -389,20 +550,31 @@ void CreateConfetti(int x, int y) {
 void DrawParticles(HDC hdc) {
     if (!gameConfig.particlesEnabled) return;
     
+    // ? OPTIMISATION : Réutiliser les objets GDI ?
+    HBRUSH currentBrush = NULL;
+    COLORREF lastColor = RGB(0, 0, 0);
+    
     for (const auto& p : particles) {
         if (p.active) {
             int size = 4;
             
-            HBRUSH brush = CreateSolidBrush(p.color);
-            SelectObject(hdc, brush);
+            // Réutiliser le brush si même couleur
+            if (p.color != lastColor || !currentBrush) {
+                if (currentBrush) SelectObject(hdc, GetStockObject(WHITE_BRUSH));
+                currentBrush = GetCachedBrush(p.color);
+                SelectObject(hdc, currentBrush);
+                lastColor = p.color;
+            }
+            
             SelectObject(hdc, GetStockObject(NULL_PEN));
             
             Ellipse(hdc, (int)p.x - size/2, (int)p.y - size/2, 
                     (int)p.x + size/2, (int)p.y + size/2);
-            
-            DeleteObject(brush);
         }
     }
+    
+    // Restaurer l'objet par défaut
+    if (currentBrush) SelectObject(hdc, GetStockObject(WHITE_BRUSH));
 }
 
 void DrawScorePanel(HDC hdc, int x, int y) {
@@ -411,23 +583,24 @@ void DrawScorePanel(HDC hdc, int x, int y) {
     // Fond du panneau avec dégradé
     DrawGradientRect(hdc, panel, RGB(40, 40, 40), RGB(60, 60, 60), true);
     
-    // Bordure dorée épaisse
-    HPEN pen = CreatePen(PS_SOLID, 3, RGB(255, 215, 0));
-    SelectObject(hdc, pen);
+    // ? Utiliser cache pour pen
+    HPEN pen = GetCachedPen(3, RGB(255, 215, 0));
+    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     SelectObject(hdc, GetStockObject(NULL_BRUSH));
     RoundRect(hdc, panel.left, panel.top, panel.right, panel.bottom, 12, 12);
-    DeleteObject(pen);
+    SelectObject(hdc, oldPen);
     
     // Libellé "SCORE"
     SetBkMode(hdc, TRANSPARENT);
     HFONT labelFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
-    SelectObject(hdc, labelFont);
+    HFONT oldFont = (HFONT)SelectObject(hdc, labelFont);
     
     RECT labelRect = {panel.left, panel.top + 5, panel.right, panel.top + 25};
     SetTextColor(hdc, RGB(200, 200, 200));
     DrawText(hdc, L"SCORE", -1, &labelRect, DT_CENTER | DT_SINGLELINE);
+    SelectObject(hdc, oldFont);
     DeleteObject(labelFont);
     
     // Valeur du score
@@ -442,6 +615,7 @@ void DrawScorePanel(HDC hdc, int x, int y) {
     SetTextColor(hdc, RGB(255, 215, 0));
     DrawText(hdc, scoreText, -1, &scoreRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     
+    SelectObject(hdc, oldFont);
     DeleteObject(scoreFont);
 }
 
@@ -450,13 +624,12 @@ void DrawComboIndicator(HDC hdc, int x, int y) {
     
     RECT rect = {x, y, x + 180, y + 60};
     
-    // Effet de lueur animé avec plusieurs couches
-    for (int i = 0; i < 5; i++) {
-        HBRUSH brush = CreateSolidBrush(RGB(255 - i*30, 140 - i*20, 0));
+    // ? OPTIMISATION: Moins de couches pour la lueur
+    for (int i = 0; i < 3; i++) {
+        HBRUSH brush = GetCachedBrush(RGB(255 - i*50, 140 - i*30, 0));
         RECT expandRect = {rect.left - i*3, rect.top - i*3, 
                           rect.right + i*3, rect.bottom + i*3};
         FrameRect(hdc, &expandRect, brush);
-        DeleteObject(brush);
     }
     
     // Fond avec dégradé orange
@@ -466,7 +639,7 @@ void DrawComboIndicator(HDC hdc, int x, int y) {
     HFONT font = CreateFont(36, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
-    SelectObject(hdc, font);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
     
     WCHAR comboText[50];
     swprintf_s(comboText, L"×%d COMBO!", comboMultiplier);
@@ -480,6 +653,7 @@ void DrawComboIndicator(HDC hdc, int x, int y) {
     SetTextColor(hdc, RGB(255, 255, 255));
     DrawText(hdc, comboText, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     
+    SelectObject(hdc, oldFont);
     DeleteObject(font);
 }
 
@@ -564,6 +738,9 @@ void DrawProgressBar(HDC hdc, int x, int y, int width, float progress) {
 void ShowHint() {
     if (hintsRemaining <= 0 || gameOver) return;
     
+    // Son magique pour l'aide ?
+    PlaySoundEffect(SFX_HINT);
+    
     // Trouver une cellule sûre
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
@@ -600,7 +777,13 @@ void CalculateScore() {
 void UpdateComboMultiplier() { 
     int revealed = revealedCells - lastRevealedCount;
     if (revealed > 5) {
+        int oldCombo = comboMultiplier;
         comboMultiplier = min(5, comboMultiplier + 1);
+        
+        // ?? Son de combo si le multiplicateur augmente
+        if (comboMultiplier > oldCombo) {
+            PlaySoundEffect(SFX_COMBO);
+        }
     } else if (revealed <= 1) {
         comboMultiplier = 1;
     }
@@ -676,6 +859,277 @@ void ToggleSound() { gameConfig.soundEnabled = !gameConfig.soundEnabled; }
 void SetZoomLevel(float zoom) { gameConfig.zoomLevel = zoom; }
 void ToggleAutoFlag() { gameConfig.autoFlag = !gameConfig.autoFlag; }
 
+// ?? FONCTIONS DE QUALITÉ GRAPHIQUE ??
+
+// Appliquer un niveau de qualité
+void ApplyGraphicsQuality(GraphicsQuality quality) {
+    gameConfig.graphicsQuality = quality;
+    const QualitySettings& settings = QUALITY_PRESETS[quality];
+    
+    gameConfig.particlesEnabled = settings.particlesEnabled;
+    gameConfig.animationsEnabled = settings.animationsEnabled;
+    
+    // Réajuster le nombre de particules
+    if (settings.particlesEnabled) {
+        // Particules du menu
+        menuParticles.resize(settings.menuParticleCount);
+        for (auto& p : menuParticles) p.active = settings.menuParticleCount > 0;
+        
+        // Particules du jeu
+        gameBackgroundParticles.resize(settings.gameParticleCount);
+        for (auto& p : gameBackgroundParticles) p.active = settings.gameParticleCount > 0;
+    } else {
+        menuParticles.clear();
+        gameBackgroundParticles.clear();
+    }
+}
+
+// Obtenir les paramètres de qualité actuels
+const QualitySettings& GetCurrentQualitySettings() {
+    return QUALITY_PRESETS[gameConfig.graphicsQuality];
+}
+
+// Obtenir le nom d'un niveau de qualité
+const wchar_t* GetQualityName(GraphicsQuality quality) {
+    switch(quality) {
+        case QUALITY_MINIMAL: return L"Très Faible";
+        case QUALITY_LOW: return L"Faible";
+        case QUALITY_MEDIUM: return L"Moyen";
+        case QUALITY_HIGH: return L"Élevé";
+        case QUALITY_ULTRA: return L"Ultra";
+        default: return L"Inconnu";
+    }
+}
+
+// ?? Afficher la boîte de dialogue des options (simplifiée)
+void ShowOptionsDialog(HWND hWndParent) {
+    WCHAR message[1024];
+    swprintf_s(message, 
+        L"?? OPTIONS DE QUALITÉ GRAPHIQUE\n\n"
+        L"????????????????????????????????????????\n\n"
+        L"Qualité actuelle : %s\n"
+        L"%s\n\n"
+        L"????????????????????????????????????????\n\n"
+        L"?? Changez la qualité avec les touches 1-5 :\n\n"
+        L"[1] Très Faible - Performance maximale\n"
+        L"    • Pas d'effets visuels\n"
+        L"    • Pas de particules\n"
+        L"    • Fond statique\n\n"
+        L"[2] Faible - Bon pour PC anciens\n"
+        L"    • Particules réduites (15)\n"
+        L"    • Effets minimaux\n\n"
+        L"[3] Moyen - Équilibré ? (Recommandé)\n"
+        L"    • Particules (30)\n"
+        L"    • Tous les effets activés\n"
+        L"    • Bon compromis\n\n"
+        L"[4] Élevé - Qualité supérieure\n"
+        L"    • Particules (40)\n"
+        L"    • Effets améliorés\n\n"
+        L"[5] Ultra - Maximum de détails\n"
+        L"    • Particules (50)\n"
+        L"    • Tous les effets au maximum\n\n"
+        L"????????????????????????????????????????\n\n"
+        L"?? Audio : %s\n"
+        L"?? Particules actuelles : %d\n"
+        L"? Animations : %s\n\n"
+        L"?? Appuyez sur M pour activer/désactiver l'audio\n"
+        L"?? La qualité s'applique immédiatement",
+        GetQualityName(gameConfig.graphicsQuality),
+        QUALITY_PRESETS[gameConfig.graphicsQuality].description,
+        gameConfig.soundEnabled ? L"Activé ?" : L"Désactivé ?",
+        (int)menuParticles.size(),
+        gameConfig.animationsEnabled ? L"Activées ?" : L"Désactivées ?"
+    );
+    
+    MessageBox(hWndParent, message, L"?? Options - Qualité Graphique", MB_OK | MB_ICONINFORMATION);
+}
+
+// ============================================
+// SYSTÈME AUDIO COMPLET - KEVIN MACLEOD READY ??
+// ============================================
+
+// Fonction helper pour charger un fichier audio
+bool LoadAndPlaySound(const wchar_t* filename, DWORD flags) {
+    // Essayer d'abord le fichier custom
+    if (PlaySound(filename, NULL, SND_FILENAME | flags) != 0) {
+        return true;
+    }
+    return false;
+}
+
+// Jouer un effet sonore
+void PlaySoundEffect(SoundEffect sfx) {
+    if (!gameConfig.soundEnabled) return;
+    
+    // Calculer le volume (0-65535 pour Windows)
+    DWORD volume = (gameConfig.sfxVolume * 655);
+    
+    switch(sfx) {
+        case SFX_CLICK:
+            // Essayer data/sounds/ d'abord, puis sounds/, puis fallback
+            if (!LoadAndPlaySound(L"data\\sounds\\click.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\click.wav", SND_ASYNC)) {
+                PlaySound(L"SystemAsterisk", NULL, SND_ALIAS | SND_ASYNC);
+            }
+            break;
+        case SFX_REVEAL:
+            if (!LoadAndPlaySound(L"data\\sounds\\reveal.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\reveal.wav", SND_ASYNC)) {
+                PlaySound(L"SystemHand", NULL, SND_ALIAS | SND_ASYNC);
+            }
+            break;
+        case SFX_FLAG:
+            if (!LoadAndPlaySound(L"data\\sounds\\flag.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\flag.wav", SND_ASYNC)) {
+                PlaySound(L"SystemNotification", NULL, SND_ALIAS | SND_ASYNC);
+            }
+            break;
+        case SFX_EXPLOSION:
+            if (!LoadAndPlaySound(L"data\\sounds\\explosion.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\explosion.wav", SND_ASYNC)) {
+                // Son d'explosion (fallback avec Beep)
+                Beep(200, 100);
+                Sleep(20);
+                Beep(150, 80);
+                Sleep(10);
+                Beep(100, 60);
+            }
+            break;
+        case SFX_WIN:
+            // Le son de victoire est géré par la musique
+            break;
+        case SFX_LOSE:
+            // Le son de défaite est géré par la musique
+            break;
+        case SFX_HINT:
+            if (!LoadAndPlaySound(L"data\\sounds\\hint.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\hint.wav", SND_ASYNC)) {
+                // Son magique pour l'aide (fallback)
+                Beep(800, 80);
+                Sleep(30);
+                Beep(1000, 80);
+                Sleep(30);
+                Beep(1200, 100);
+            }
+            break;
+        case SFX_COMBO:
+            if (!LoadAndPlaySound(L"data\\sounds\\combo.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\combo.wav", SND_ASYNC)) {
+                // Son de combo (fallback)
+                for(int i = 0; i < 3; i++) {
+                    Beep(600 + i * 200, 50);
+                    Sleep(20);
+                }
+            }
+            break;
+        case SFX_BUTTON_HOVER:
+            if (!LoadAndPlaySound(L"data\\sounds\\hover.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\hover.wav", SND_ASYNC)) {
+                Beep(800, 30);
+            }
+            break;
+        case SFX_BUTTON_CLICK:
+            if (!LoadAndPlaySound(L"data\\sounds\\button.wav", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\button.wav", SND_ASYNC)) {
+                Beep(600, 50);
+            }
+            break;
+    }
+}
+
+// ?? Jouer une musique de fond - KEVIN MACLEOD EDITION
+void PlayBackgroundMusic(MusicTrack track) {
+    if (!gameConfig.soundEnabled) return;
+    if (currentMusic == track && isMusicPlaying) return;
+    
+    currentMusic = track;
+    isMusicPlaying = true;
+    
+    // ?? Charger les musiques de Kevin MacLeod depuis data/sounds/ ou sounds/
+    switch(track) {
+        case MUSIC_MENU:
+            // Musique du menu (boucle) - Ex: "Wallpaper" de Kevin MacLeod
+            if (!LoadAndPlaySound(L"data\\sounds\\menu.mp3", SND_ASYNC | SND_LOOP) &&
+                !LoadAndPlaySound(L"sounds\\menu.mp3", SND_ASYNC | SND_LOOP)) {
+                // Essayer WAV si MP3 ne fonctionne pas
+                if (!LoadAndPlaySound(L"data\\sounds\\menu.wav", SND_ASYNC | SND_LOOP) &&
+                    !LoadAndPlaySound(L"sounds\\menu.wav", SND_ASYNC | SND_LOOP)) {
+                    // Fallback sur son système
+                    PlaySound(L"C:\\Windows\\Media\\Windows Notify.wav", NULL, 
+                             SND_FILENAME | SND_ASYNC | SND_LOOP);
+                }
+            }
+            break;
+            
+        case MUSIC_GAME:
+            // Musique de jeu (calme, concentration) - Ex: "Sakura Girl" de Kevin MacLeod
+            if (!LoadAndPlaySound(L"data\\sounds\\game.mp3", SND_ASYNC | SND_LOOP) &&
+                !LoadAndPlaySound(L"sounds\\game.mp3", SND_ASYNC | SND_LOOP)) {
+                if (!LoadAndPlaySound(L"data\\sounds\\game.wav", SND_ASYNC | SND_LOOP) &&
+                    !LoadAndPlaySound(L"sounds\\game.wav", SND_ASYNC | SND_LOOP)) {
+                    // Fallback sur son système
+                    PlaySound(L"C:\\Windows\\Media\\Windows Background.wav", NULL, 
+                             SND_FILENAME | SND_ASYNC | SND_LOOP);
+                }
+            }
+            break;
+            
+        case MUSIC_WIN:
+            // Musique de victoire - Ex: "Celebration" de Kevin MacLeod
+            if (!LoadAndPlaySound(L"data\\sounds\\win.mp3", SND_ASYNC) &&
+                !LoadAndPlaySound(L"sounds\\win.mp3", SND_ASYNC)) {
+                if (!LoadAndPlaySound(L"data\\sounds\\win.wav", SND_ASYNC) &&
+                    !LoadAndPlaySound(L"sounds\\win.wav", SND_ASYNC)) {
+                    // Fallback sur son système
+                    PlaySound(L"C:\\Windows\\Media\\tada.wav", NULL, 
+                             SND_FILENAME | SND_ASYNC);
+                }
+            }
+            break;
+    }
+}
+
+// Arrêter la musique
+void StopMusic() {
+    PlaySound(NULL, NULL, 0);
+    isMusicPlaying = false;
+    currentMusic = MUSIC_COUNT;
+}
+
+// Ajuster le volume de la musique
+void SetMusicVolume(int volume) {
+    gameConfig.musicVolume = max(0, min(100, volume));
+    
+    // Sous Windows, on utilise waveOutSetVolume
+    DWORD dwVolume = ((gameConfig.musicVolume * 0xFFFF) / 100);
+    dwVolume = (dwVolume << 16) | dwVolume;
+    waveOutSetVolume(0, dwVolume);
+}
+
+// Ajuster le volume des effets sonores
+void SetSFXVolume(int volume) {
+    gameConfig.sfxVolume = max(0, min(100, volume));
+}
+
+// Basculer le son
+void ToggleAudio() {
+    gameConfig.soundEnabled = !gameConfig.soundEnabled;
+    if (!gameConfig.soundEnabled) {
+        StopMusic();
+    } else {
+        // Reprendre la musique selon l'état du jeu
+        if (gameState == STATE_MENU) {
+            PlayBackgroundMusic(MUSIC_MENU);
+        } else if (gameState == STATE_PLAYING) {
+            PlayBackgroundMusic(MUSIC_GAME);
+        }
+    }
+}
+
+// ============================================
+// FIN SYSTÈME AUDIO
+// ============================================
+
 // Initialisation du cache GDI (améliore considérablement les performances)
 void InitGDICache() {
     if (!g_brushGray) {
@@ -710,6 +1164,9 @@ void CleanupGDICache() {
     if (g_penBlack) DeleteObject(g_penBlack);
     if (g_fontDigital) DeleteObject(g_fontDigital);
     if (g_fontCell) DeleteObject(g_fontCell);
+    
+    // ? Nettoyer le cache étendu
+    ClearExtendedCache();
 }
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -845,9 +1302,13 @@ void RevealCell(int row, int col)
     if (grid[row][col].hasMine) {
         gameOver = true;
         gameWon = false;
+        PlaySoundEffect(SFX_EXPLOSION); // ?? Son d'explosion
         RevealAllMines();
         return;
     }
+    
+    // Son de révélation
+    PlaySoundEffect(SFX_REVEAL);
     
     if (grid[row][col].adjacentMines == 0) {
         for (int di = -1; di <= 1; di++) {
@@ -868,13 +1329,16 @@ void ToggleFlag(int row, int col)
     if (grid[row][col].state == HIDDEN) {
         grid[row][col].state = FLAGGED;
         flagsPlaced++;
+        PlaySoundEffect(SFX_FLAG); // ?? Son de drapeau
     }
     else if (grid[row][col].state == FLAGGED) {
         grid[row][col].state = QUESTION;
         flagsPlaced--;
+        PlaySoundEffect(SFX_CLICK);
     }
     else if (grid[row][col].state == QUESTION) {
         grid[row][col].state = HIDDEN;
+        PlaySoundEffect(SFX_CLICK);
     }
 }
 
@@ -896,6 +1360,10 @@ void CheckWinCondition()
         UpdateStats(true);
         CalculateScore();
         
+        // ?? VICTOIRE - Musique et effets !
+        PlaySoundEffect(SFX_WIN);
+        PlayBackgroundMusic(MUSIC_WIN);
+        
         // Célébration avec confettis!
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
@@ -910,6 +1378,8 @@ void CheckWinCondition()
 
 void RevealAllMines()
 {
+    PlaySoundEffect(SFX_LOSE); // ?? Son de défaite
+    
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             if (grid[i][j].hasMine) {
@@ -945,24 +1415,29 @@ void DrawGradientRect(HDC hdc, RECT rect, COLORREF color1, COLORREF color2, bool
     int width = rect.right - rect.left;
     int height = rect.bottom - rect.top;
     
-    int steps = vertical ? height : width;
-    if (steps <= 0) return;
+    if (width <= 0 || height <= 0) return;
     
-    for (int i = 0; i < steps; i++) {
-        int r = GetRValue(color1) + (GetRValue(color2) - GetRValue(color1)) * i / steps;
-        int g = GetGValue(color1) + (GetGValue(color2) - GetGValue(color1)) * i / steps;
-        int b = GetBValue(color1) + (GetBValue(color2) - GetBValue(color1)) * i / steps;
-        
-        HBRUSH brush = CreateSolidBrush(RGB(r, g, b));
-        RECT lineRect;
-        if (vertical) {
-            lineRect = {rect.left, rect.top + i, rect.right, rect.top + i + 1};
-        } else {
-            lineRect = {rect.left + i, rect.top, rect.left + i + 1, rect.bottom};
-        }
-        FillRect(hdc, &lineRect, brush);
-        DeleteObject(brush);
-    }
+    // ? OPTIMISATION : Utiliser GradientFill de Windows (bien plus rapide) ?
+    TRIVERTEX vertex[2];
+    vertex[0].x = rect.left;
+    vertex[0].y = rect.top;
+    vertex[0].Red = GetRValue(color1) << 8;
+    vertex[0].Green = GetGValue(color1) << 8;
+    vertex[0].Blue = GetBValue(color1) << 8;
+    vertex[0].Alpha = 0x0000;
+
+    vertex[1].x = rect.right;
+    vertex[1].y = rect.bottom;
+    vertex[1].Red = GetRValue(color2) << 8;
+    vertex[1].Green = GetGValue(color2) << 8;
+    vertex[1].Blue = GetBValue(color2) << 8;
+    vertex[1].Alpha = 0x0000;
+
+    GRADIENT_RECT gRect;
+    gRect.UpperLeft = 0;
+    gRect.LowerRight = 1;
+
+    GradientFill(hdc, vertex, 2, &gRect, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
 void DrawMine(HDC hdc, int x, int y, int size)
@@ -1338,104 +1813,102 @@ void DrawMenuButton(HDC hdc, RECT button, const WCHAR* text, bool hovered) {
 }
 
 void DrawMenu(HDC hdc, HWND hWnd) {
-    RECT clientRect;
-    GetClientRect(hWnd, &clientRect);
-    int width = clientRect.right;
-    int height = clientRect.bottom;
+RECT clientRect;
+GetClientRect(hWnd, &clientRect);
+int width = clientRect.right;
+int height = clientRect.bottom;
     
-    // ????? Fond avec dégradé bleu foncé ANIMÉ ?????
-    COLORREF color1 = RGB(41 + (int)(sin(menuAnimationTime) * 10), 128, 185);
-    COLORREF color2 = RGB(109, 213 + (int)(cos(menuAnimationTime * 0.7f) * 10), 250);
-    DrawGradientRect(hdc, clientRect, color1, color2, true);
+// ?? Récupérer les paramètres de qualité
+const QualitySettings& quality = GetCurrentQualitySettings();
     
-    // ????? Effet de flou avec couches semi-transparentes ANIMÉES ?????
-    for (int layer = 0; layer < 3; layer++) {
-        for (int i = 0; i < 10; i++) {
-            int x = (width / 10) * i + (int)(sin(menuAnimationTime + i) * 30);
-            int y = (height / 10) * ((layer * 3 + i) % 10) + (int)(cos(menuAnimationTime * 0.8f + i) * 20);
+// Fond avec dégradé bleu foncé ANIMÉ
+COLORREF color1 = RGB(41 + (int)(sin(menuAnimationTime) * 10), 128, 185);
+COLORREF color2 = RGB(109, 213 + (int)(cos(menuAnimationTime * 0.7f) * 10), 250);
+DrawGradientRect(hdc, clientRect, color1, color2, true);
+    
+// ?? Effet de flou selon qualité
+if (quality.menuBlurLayers > 0) {
+    for (int layer = 0; layer < quality.menuBlurLayers; layer++) {
+        for (int i = 0; i < 8; i++) {
+            int x = (width / 8) * i + (int)(sin(menuAnimationTime + i) * 30);
+            int y = (height / 8) * ((layer * 3 + i) % 8) + (int)(cos(menuAnimationTime * 0.8f + i) * 20);
             int size = 80 + (int)(sin(menuAnimationTime + i * 0.5f) * 20);
-            
-            // Couleur semi-transparente
-            int alpha = 220 - layer * 20;
-            HBRUSH blurBrush = CreateSolidBrush(RGB(alpha, alpha, 255));
+                
+            int alpha = 220 - layer * 30;
+            HBRUSH blurBrush = GetCachedBrush(RGB(alpha, alpha, 255));
             SelectObject(hdc, blurBrush);
             SelectObject(hdc, GetStockObject(NULL_PEN));
-            
-            // Dessiner plusieurs fois pour effet de flou
-            for (int j = 0; j < 3; j++) {
-                int offset = j * 2;
+                
+            for (int j = 0; j < 2; j++) {
+                int offset = j * 3;
                 Ellipse(hdc, x - size/2 + offset, y - size/2 + offset, 
                        x + size/2 + offset, y + size/2 + offset);
             }
-            
-            DeleteObject(blurBrush);
         }
     }
+}
     
-    // ????? Particules flottantes ANIMÉES avec trainée ?????
+// ?? Particules selon qualité
+if (quality.particlesEnabled && quality.menuParticleCount > 0) {
     for (const auto& p : menuParticles) {
         if (p.active) {
             int size = 6 + (int)(sin(menuAnimationTime * 3.0f + p.x * 0.1f) * 3);
-            
-            // Trainée de la particule (3 niveaux)
-            for (int trail = 0; trail < 3; trail++) {
-                int trailX = (int)p.x - trail * (int)p.vx * 5;
-                int trailY = (int)p.y - trail * (int)p.vy * 5;
-                int trailSize = size - trail;
-                int trailAlpha = 255 - trail * 60;
                 
-                HBRUSH trailBrush = CreateSolidBrush(RGB(trailAlpha, trailAlpha, 255));
-                SelectObject(hdc, trailBrush);
-                SelectObject(hdc, GetStockObject(NULL_PEN));
+            HBRUSH brush = GetCachedBrush(RGB(255, 255, 255));
+            SelectObject(hdc, brush);
+            SelectObject(hdc, GetStockObject(NULL_PEN));
                 
-                Ellipse(hdc, trailX - trailSize/2, trailY - trailSize/2, 
-                       trailX + trailSize/2, trailY + trailSize/2);
-                
-                DeleteObject(trailBrush);
-            }
+            Ellipse(hdc, (int)p.x - size/2, (int)p.y - size/2, 
+                   (int)p.x + size/2, (int)p.y + size/2);
         }
     }
+}
     
-    // ????? Vignette pour effet de profondeur ?????
-    for (int i = 0; i < 100; i += 10) {
-        int alpha = 10 + i / 10;
-        HPEN vignettePen = CreatePen(PS_SOLID, 20, RGB(0, 0, alpha));
-        SelectObject(hdc, vignettePen);
+// ?? Vignette selon qualité
+if (quality.menuBlurLayers > 0) {
+    for (int i = 0; i < 100; i += 20) {
+        int alpha = 10 + i / 20;
+        HPEN vignettePen = GetCachedPen(20, RGB(0, 0, alpha));
+        HPEN oldPen = (HPEN)SelectObject(hdc, vignettePen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
         Rectangle(hdc, i, i, width - i, height - i);
-        DeleteObject(vignettePen);
+        SelectObject(hdc, oldPen);
     }
+}
     
-    // ????? Titre avec effet de lueur multiple ANIMÉ ?????
-    HFONT titleFont = CreateFont(120, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
-    SelectObject(hdc, titleFont);
+// Titre avec effet de lueur OPTIMISÉ
+HFONT titleFont = CreateFont(120, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+HFONT oldFont = (HFONT)SelectObject(hdc, titleFont);
     
-    SetBkMode(hdc, TRANSPARENT);
-    RECT titleRect = {0, 100, width, 250};
+SetBkMode(hdc, TRANSPARENT);
+RECT titleRect = {0, 100, width, 250};
     
-    // Effet de lueur (glow) animé - 10 couches
-    for (int glow = 10; glow > 0; glow -= 2) {
-        int glowIntensity = 100 + glow * 10 + (int)(sin(menuAnimationTime * 2.0f) * 20);
-        RECT glowRect = {titleRect.left - glow, titleRect.top - glow, 
-                        titleRect.right + glow, titleRect.bottom + glow};
-        SetTextColor(hdc, RGB(glowIntensity, 150 + glow * 5, 255));
-        DrawText(hdc, L"?? DÉMINEUR", -1, &glowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
+// ?? Effet de lueur selon qualité
+int glowLayers = quality.titleGlowLayers;
+for (int glow = glowLayers * 2; glow > 0; glow -= 4) {
+    int glowIntensity = 100 + glow * 10 + (int)(sin(menuAnimationTime * 2.0f) * 20);
+    RECT glowRect = {titleRect.left - glow, titleRect.top - glow, 
+                    titleRect.right + glow, titleRect.bottom + glow};
+    SetTextColor(hdc, RGB(glowIntensity, 150 + glow * 5, 255));
+    DrawText(hdc, L"?? DÉMINEUR", -1, &glowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
     
-    // Ombre portée noire
-    SetTextColor(hdc, RGB(0, 0, 0));
-    RECT titleShadow = {titleRect.left + 5, titleRect.top + 5, titleRect.right + 5, titleRect.bottom + 5};
-    DrawText(hdc, L"?? DÉMINEUR", -1, &titleShadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+// Ombre portée noire
+SetTextColor(hdc, RGB(0, 0, 0));
+RECT titleShadow = {titleRect.left + 5, titleRect.top + 5, titleRect.right + 5, titleRect.bottom + 5};
+DrawText(hdc, L"?? DÉMINEUR", -1, &titleShadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     
-    // Titre principal blanc éclatant
-    SetTextColor(hdc, RGB(255, 255, 255));
-    DrawText(hdc, L"?? DÉMINEUR", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+// Titre principal blanc éclatant
+SetTextColor(hdc, RGB(255, 255, 255));
+DrawText(hdc, L"?? DÉMINEUR", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     
-    DeleteObject(titleFont);
+SelectObject(hdc, oldFont);
+DeleteObject(titleFont);
     
-    // ????? Sous-titre ANIMÉ avec pulsation ?????
+    
+    // Sous-titre ANIMÉ avec pulsation
     HFONT subtitleFont = CreateFont(32, 0, 0, 0, FW_NORMAL, TRUE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
@@ -1444,11 +1917,15 @@ void DrawMenu(HDC hdc, HWND hWnd) {
     RECT subtitleRect = {0, 250, width, 300};
     int subtitleAlpha = 200 + (int)(sin(menuAnimationTime * 2.0f) * 55);
     SetTextColor(hdc, RGB(subtitleAlpha, subtitleAlpha, subtitleAlpha + 20));
-    DrawText(hdc, L"Version Ultra HD 1920×1080 • Flou Dynamique Activé ?", -1, &subtitleRect, DT_CENTER | DT_SINGLELINE);
+    
+    // ?? Afficher la qualité graphique actuelle
+    WCHAR subtitle[256];
+    swprintf_s(subtitle, L"Version Ultra HD 1920×1080 • Qualité: %s ??", GetQualityName(gameConfig.graphicsQuality));
+    DrawText(hdc, subtitle, -1, &subtitleRect, DT_CENTER | DT_SINGLELINE);
     
     DeleteObject(subtitleFont);
     
-    // ????? Boutons avec animation de pulsation ?????
+    // Boutons avec animation de pulsation
     int buttonWidth = 400;
     int buttonHeight = 80;
     int buttonSpacing = 30;
@@ -1465,14 +1942,15 @@ void DrawMenu(HDC hdc, HWND hWnd) {
     RECT quitButton = {centerX - buttonWidth/2, startY + 2*(buttonHeight + buttonSpacing), 
                        centerX + buttonWidth/2, startY + 3*buttonHeight + 2*buttonSpacing};
     
-    // ????? Aura lumineuse verte autour du bouton JOUER ?????
-    for (int aura = 5; aura > 0; aura--) {
-        HPEN auraPen = CreatePen(PS_SOLID, 2, RGB(100 + aura * 20, 255 - aura * 20, 100));
-        SelectObject(hdc, auraPen);
+    // ?? Aura selon qualité
+    int auraLayers = quality.buttonAuraLayers;
+    for (int aura = auraLayers; aura > 0; aura--) {
+        HPEN auraPen = GetCachedPen(2, RGB(100 + aura * 30, 255 - aura * 30, 100));
+        HPEN oldPen = (HPEN)SelectObject(hdc, auraPen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
         RoundRect(hdc, playButton.left - aura*2, playButton.top - aura*2, 
                  playButton.right + aura*2, playButton.bottom + aura*2, 15, 15);
-        DeleteObject(auraPen);
+        SelectObject(hdc, oldPen);
     }
     
     DrawMenuButton(hdc, playButton, L"? JOUER", false);
@@ -1492,6 +1970,34 @@ void DrawMenu(HDC hdc, HWND hWnd) {
              -1, &footerRect, DT_CENTER | DT_SINGLELINE);
     
     DeleteObject(footerFont);
+    
+    // ?? Indicateur audio en bas à droite
+    RECT audioRect = {width - 200, height - 100, width - 20, height - 70};
+    HFONT audioFont = CreateFont(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, audioFont);
+    
+    SetBkMode(hdc, TRANSPARENT);
+    if (gameConfig.soundEnabled) {
+        SetTextColor(hdc, RGB(76, 175, 80)); // Vert
+        DrawText(hdc, L"?? AUDIO ON", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+    } else {
+        SetTextColor(hdc, RGB(244, 67, 54)); // Rouge
+        DrawText(hdc, L"?? AUDIO OFF", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+    }
+    DeleteObject(audioFont);
+    
+    // Instructions pour le son
+    HFONT instructFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, instructFont);
+    
+    RECT instructRect = {width - 200, height - 70, width - 20, height - 50};
+    SetTextColor(hdc, RGB(200, 200, 200));
+    DrawText(hdc, L"Touche M: On/Off", -1, &instructRect, DT_CENTER | DT_SINGLELINE);
+    DeleteObject(instructFont);
 }
 
 void DrawGame(HDC hdc, HWND hWnd)
@@ -1501,89 +2007,81 @@ void DrawGame(HDC hdc, HWND hWnd)
     int width = clientRect.right - clientRect.left;
     int height = clientRect.bottom - clientRect.top;
     
-    // ????????? FOND ANIMÉ AUTOUR DE LA ZONE DE JEU ?????????
-    // Dégradé de fond animé
-    COLORREF bgColor1 = RGB(30 + (int)(sin(gameBackgroundTime * 0.5f) * 15), 
-                           35 + (int)(cos(gameBackgroundTime * 0.3f) * 15), 
-                           50 + (int)(sin(gameBackgroundTime * 0.4f) * 20));
-    COLORREF bgColor2 = RGB(50 + (int)(cos(gameBackgroundTime * 0.4f) * 15), 
-                           60 + (int)(sin(gameBackgroundTime * 0.6f) * 15), 
-                           80 + (int)(cos(gameBackgroundTime * 0.5f) * 20));
-    DrawGradientRect(hdc, clientRect, bgColor1, bgColor2, true);
+    // ?? Récupérer les paramètres de qualité
+    const QualitySettings& quality = GetCurrentQualitySettings();
     
-    // Vagues lumineuses animées (effet aurora)
-    for (int wave = 0; wave < 5; wave++) {
-        float waveOffset = gameBackgroundTime + wave * 1.5f;
-        int numPoints = 100;
-        
-        for (int i = 0; i < numPoints - 1; i++) {
-            float x1 = (float)width * i / numPoints;
-            float x2 = (float)width * (i + 1) / numPoints;
-            
-            float y1 = height * 0.3f + sin(waveOffset + x1 * 0.01f) * 80 + wave * 60;
-            float y2 = height * 0.3f + sin(waveOffset + x2 * 0.01f) * 80 + wave * 60;
-            
-            int alpha = 30 - wave * 5;
-            HPEN wavePen = CreatePen(PS_SOLID, 3, RGB(100 + wave * 20, 150 + wave * 10, 255 - wave * 20));
-            SelectObject(hdc, wavePen);
-            
-            MoveToEx(hdc, (int)x1, (int)y1, NULL);
-            LineTo(hdc, (int)x2, (int)y2);
-            
-            DeleteObject(wavePen);
-        }
+    // Dégradé de fond animé
+    if (quality.backgroundAnimations) {
+        COLORREF bgColor1 = RGB(30 + (int)(sin(gameBackgroundTime * 0.5f) * 15), 
+                               35 + (int)(cos(gameBackgroundTime * 0.3f) * 15), 
+                               50 + (int)(sin(gameBackgroundTime * 0.4f) * 20));
+        COLORREF bgColor2 = RGB(50 + (int)(cos(gameBackgroundTime * 0.4f) * 15), 
+                               60 + (int)(sin(gameBackgroundTime * 0.6f) * 15), 
+                               80 + (int)(cos(gameBackgroundTime * 0.5f) * 20));
+        DrawGradientRect(hdc, clientRect, bgColor1, bgColor2, true);
+    } else {
+        // Fond statique simple
+        HBRUSH bgBrush = GetCachedBrush(RGB(40, 45, 60));
+        FillRect(hdc, &clientRect, bgBrush);
     }
     
-    // Particules de fond flottantes
-    for (const auto& p : gameBackgroundParticles) {
-        if (p.active) {
-            int size = 8 + (int)(sin(gameBackgroundTime * 2.0f + p.x * 0.05f) * 4);
+    // ?? Vagues selon qualité
+    if (quality.backgroundAnimations && quality.waveCount > 0) {
+        for (int wave = 0; wave < quality.waveCount; wave++) {
+            float waveOffset = gameBackgroundTime + wave * 2.0f;
+            int numPoints = 50;
             
-            // Effet de lueur autour de la particule
-            for (int glow = 3; glow > 0; glow--) {
-                int glowSize = size + glow * 3;
-                int glowAlpha = 100 - glow * 30;
+            HPEN wavePen = GetCachedPen(3, RGB(100 + wave * 30, 150 + wave * 15, 255 - wave * 30));
+            HPEN oldPen = (HPEN)SelectObject(hdc, wavePen);
+            
+            for (int i = 0; i < numPoints - 1; i++) {
+                float x1 = (float)width * i / numPoints;
+                float x2 = (float)width * (i + 1) / numPoints;
                 
-                HBRUSH glowBrush = CreateSolidBrush(p.color);
-                SelectObject(hdc, glowBrush);
-                SelectObject(hdc, GetStockObject(NULL_PEN));
+                float y1 = height * 0.3f + sin(waveOffset + x1 * 0.01f) * 80 + wave * 80;
+                float y2 = height * 0.3f + sin(waveOffset + x2 * 0.01f) * 80 + wave * 80;
                 
-                Ellipse(hdc, (int)p.x - glowSize/2, (int)p.y - glowSize/2, 
-                       (int)p.x + glowSize/2, (int)p.y + glowSize/2);
-                
-                DeleteObject(glowBrush);
+                MoveToEx(hdc, (int)x1, (int)y1, NULL);
+                LineTo(hdc, (int)x2, (int)y2);
             }
             
-            // Particule principale
-            HBRUSH brush = CreateSolidBrush(p.color);
-            SelectObject(hdc, brush);
-            SelectObject(hdc, GetStockObject(NULL_PEN));
-            
-            Ellipse(hdc, (int)p.x - size/2, (int)p.y - size/2, 
-                   (int)p.x + size/2, (int)p.y + size/2);
-            
-            DeleteObject(brush);
+            SelectObject(hdc, oldPen);
         }
     }
     
-    // Étoiles scintillantes
-    for (int star = 0; star < 30; star++) {
-        int starX = (star * 137) % width;
-        int starY = (star * 219) % height;
-        float brightness = sin(gameBackgroundTime * 3.0f + star * 0.5f) * 0.5f + 0.5f;
-        int alpha = (int)(brightness * 255);
-        
-        HBRUSH starBrush = CreateSolidBrush(RGB(alpha, alpha, 255));
-        SelectObject(hdc, starBrush);
-        SelectObject(hdc, GetStockObject(NULL_PEN));
-        
-        int starSize = 3 + (int)(brightness * 2);
-        Ellipse(hdc, starX - starSize/2, starY - starSize/2, 
-               starX + starSize/2, starY + starSize/2);
-        
-        DeleteObject(starBrush);
+    // ?? Particules de fond selon qualité
+    if (quality.particlesEnabled && quality.gameParticleCount > 0) {
+        for (const auto& p : gameBackgroundParticles) {
+            if (p.active) {
+                int size = 8 + (int)(sin(gameBackgroundTime * 2.0f + p.x * 0.05f) * 4);
+                
+                HBRUSH brush = GetCachedBrush(p.color);
+                SelectObject(hdc, brush);
+                SelectObject(hdc, GetStockObject(NULL_PEN));
+                
+                Ellipse(hdc, (int)p.x - size/2, (int)p.y - size/2, 
+                       (int)p.x + size/2, (int)p.y + size/2);
+            }
+        }
     }
-    // ????????? FIN DU FOND ANIMÉ ?????????
+    
+    // ?? Étoiles selon qualité
+    if (quality.backgroundAnimations && quality.starCount > 0) {
+        for (int star = 0; star < quality.starCount; star++) {
+            int starX = (star * 137) % width;
+            int starY = (star * 219) % height;
+            float brightness = sin(gameBackgroundTime * 3.0f + star * 0.5f) * 0.5f + 0.5f;
+            int alpha = (int)(brightness * 255);
+            
+            HBRUSH starBrush = GetCachedBrush(RGB(alpha, alpha, 255));
+            SelectObject(hdc, starBrush);
+            SelectObject(hdc, GetStockObject(NULL_PEN));
+            
+            int starSize = 3 + (int)(brightness * 2);
+            Ellipse(hdc, starX - starSize/2, starY - starSize/2, 
+                   starX + starSize/2, starY + starSize/2);
+        }
+    }
     
     DrawHeader(hdc, width);
     
@@ -1672,6 +2170,12 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    SetTimer(hWnd, 1, 1000, NULL);  // Timer principal (1 seconde)
    SetTimer(hWnd, 2, 16, NULL);    // Timer d'animation (60 FPS)
+   
+   // ?? Appliquer la qualité graphique par défaut
+   ApplyGraphicsQuality(gameConfig.graphicsQuality);
+   
+   // ?? Démarrer la musique du menu au lancement
+   PlayBackgroundMusic(MUSIC_MENU);
 
    return TRUE;
 }
@@ -1695,24 +2199,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 currentDifficulty = FACILE;
                 InitializeGame(currentDifficulty);
                 gameState = STATE_PLAYING;
+                PlayBackgroundMusic(MUSIC_GAME); // ?? Musique de jeu
                 InvalidateRect(hWnd, NULL, FALSE);
                 break;
             case IDM_DIFFICULTY_MOYEN:
                 currentDifficulty = MOYEN;
                 InitializeGame(currentDifficulty);
                 gameState = STATE_PLAYING;
+                PlayBackgroundMusic(MUSIC_GAME); // ?? Musique de jeu
                 InvalidateRect(hWnd, NULL, FALSE);
                 break;
             case IDM_DIFFICULTY_DIFFICILE:
                 currentDifficulty = DIFFICILE;
                 InitializeGame(currentDifficulty);
                 gameState = STATE_PLAYING;
+                PlayBackgroundMusic(MUSIC_GAME); // ?? Musique de jeu
                 InvalidateRect(hWnd, NULL, FALSE);
                 break;
             case IDM_DIFFICULTY_EXPERT:
                 currentDifficulty = EXPERT;
                 InitializeGame(currentDifficulty);
                 gameState = STATE_PLAYING;
+                PlayBackgroundMusic(MUSIC_GAME); // ?? Musique de jeu
                 InvalidateRect(hWnd, NULL, FALSE);
                 break;
             default:
@@ -1727,6 +2235,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_KEYDOWN:
         {
             switch (wParam) {
+                // ?? Touches 1-5 pour changer la qualité graphique
+                case '1':
+                    ApplyGraphicsQuality(QUALITY_MINIMAL);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
+                case '2':
+                    ApplyGraphicsQuality(QUALITY_LOW);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
+                case '3':
+                    ApplyGraphicsQuality(QUALITY_MEDIUM);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
+                case '4':
+                    ApplyGraphicsQuality(QUALITY_HIGH);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
+                case '5':
+                    ApplyGraphicsQuality(QUALITY_ULTRA);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
+                    
                 case 'H': // Hint
                     if (gameState == STATE_PLAYING && !gameOver && hintsRemaining > 0) {
                         ShowHint();
@@ -1736,23 +2266,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 case 'P': // Pause
                     if (gameState == STATE_PLAYING) {
                         isPaused = !isPaused;
+                        PlaySoundEffect(SFX_CLICK);
                         InvalidateRect(hWnd, NULL, FALSE);
                     }
                     break;
                 case 'R': // Restart
                     if (gameState == STATE_PLAYING) {
                         InitializeGame(currentDifficulty);
+                        PlayBackgroundMusic(MUSIC_GAME);
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
                         InvalidateRect(hWnd, NULL, FALSE);
                     }
                     break;
                 case 'C': // Clear hint
                     if (gameState == STATE_PLAYING) {
                         ClearHint();
+                        PlaySoundEffect(SFX_CLICK);
                         InvalidateRect(hWnd, NULL, FALSE);
                     }
                     break;
+                case 'M': // Toggle Music/Sound
+                    ToggleAudio();
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    break;
                 case VK_ESCAPE: // Retour au menu
                     gameState = STATE_MENU;
+                    PlayBackgroundMusic(MUSIC_MENU); // ?? Musique du menu
+                    PlaySoundEffect(SFX_BUTTON_CLICK);
                     InvalidateRect(hWnd, NULL, FALSE);
                     break;
             }
@@ -1786,18 +2326,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 if (x >= playButton.left && x <= playButton.right &&
                     y >= playButton.top && y <= playButton.bottom) {
                     // Bouton JOUER
+                    PlaySoundEffect(SFX_BUTTON_CLICK); // ?? Son de clic
                     gameState = STATE_PLAYING;
                     InitializeGame(currentDifficulty);
+                    PlayBackgroundMusic(MUSIC_GAME); // ?? Démarrer musique de jeu
                     InvalidateRect(hWnd, NULL, FALSE);
                 }
                 else if (x >= optionsButton.left && x <= optionsButton.right &&
                          y >= optionsButton.top && y <= optionsButton.bottom) {
-                    // Bouton OPTIONS
-                    MessageBox(hWnd, L"Options à venir !", L"Options", MB_OK | MB_ICONINFORMATION);
+                    // Bouton OPTIONS - ?? Afficher le menu de qualité
+                    PlaySoundEffect(SFX_BUTTON_CLICK);
+                    ShowOptionsDialog(hWnd);
+                    InvalidateRect(hWnd, NULL, FALSE); // Redessiner avec la nouvelle qualité
                 }
                 else if (x >= quitButton.left && x <= quitButton.right &&
                          y >= quitButton.top && y <= quitButton.bottom) {
                     // Bouton QUITTER
+                    PlaySoundEffect(SFX_BUTTON_CLICK);
                     DestroyWindow(hWnd);
                 }
                 break;
@@ -1813,14 +2358,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 if (x >= hintButtonRect.left && x <= hintButtonRect.right &&
                     y >= hintButtonRect.top && y <= hintButtonRect.bottom) {
                     if (!gameOver && hintsRemaining > 0) {
-                        ShowHint();
+                        ShowHint(); // Le son est déjà dans ShowHint()
                         InvalidateRect(hWnd, NULL, FALSE);
+                    } else {
+                        // Son d'erreur si pas d'aide disponible
+                        Beep(300, 100);
                     }
                     break;
                 }
                 
                 if (gameOver) {
+                    PlaySoundEffect(SFX_BUTTON_CLICK);
                     InitializeGame(currentDifficulty);
+                    PlayBackgroundMusic(MUSIC_GAME);
                     InvalidateRect(hWnd, NULL, FALSE);
                     break;
                 }
@@ -2008,7 +2558,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     
                     RECT instructRect = {MARGIN + 150, footerY + 10, clientRect.right - MARGIN, footerY + 30};
                     SetTextColor(hdcMem, RGB(200, 200, 200));
-                    DrawText(hdcMem, L"Touches: H=Aide | P=Pause | R=Recommencer | ESC=Menu", 
+                    DrawText(hdcMem, L"Touches: H=Aide | P=Pause | R=Recommencer | M=Audio | ESC=Menu", 
                             -1, &instructRect, DT_LEFT | DT_SINGLELINE);
                     
                     RECT instruct2Rect = {MARGIN + 150, footerY + 35, clientRect.right - MARGIN, footerY + 55};
@@ -2017,6 +2567,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     
                     DeleteObject(font);
                 }
+                
+                // ?? Indicateur audio en bas à droite du HUD
+                RECT audioRect = {clientRect.right - 150, footerY + 20, clientRect.right - 20, footerY + 50};
+                HFONT audioFont = CreateFont(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                    ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+                SelectObject(hdcMem, audioFont);
+                
+                SetBkMode(hdcMem, TRANSPARENT);
+                if (gameConfig.soundEnabled) {
+                    SetTextColor(hdcMem, RGB(76, 175, 80)); // Vert
+                    DrawText(hdcMem, L"?? ON", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+                } else {
+                    SetTextColor(hdcMem, RGB(244, 67, 54)); // Rouge
+                    DrawText(hdcMem, L"?? OFF", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+                }
+                DeleteObject(audioFont);
             }
             
             BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, hdcMem, 0, 0, SRCCOPY);
@@ -2032,6 +2599,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         KillTimer(hWnd, 1);
         KillTimer(hWnd, 2);
+        StopMusic(); // ?? Arrêter la musique
         CleanupGDICache(); // Libérer le cache GDI
         PostQuitMessage(0);
         break;
@@ -2048,6 +2616,26 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_INITDIALOG:
+        {
+            // Définir le texte de la boîte "À propos" avec les crédits audio
+            SetDlgItemText(hDlg, IDC_STATIC, 
+                L"DÉMINEUR HD - Version 1.0\n\n"
+                L"Jeu de Démineur Avancé\n"
+                L"Résolution: 1920x1080\n\n"
+                L"???????????????????????\n\n"
+                L"?? MUSIQUES\n"
+                L"Music by Kevin MacLeod (incompetech.com)\n"
+                L"Licensed under Creative Commons:\n"
+                L"By Attribution 4.0 License\n"
+                L"http://creativecommons.org/licenses/by/4.0/\n\n"
+                L"Titres utilisés:\n"
+                L"• Wallpaper (Menu)\n"
+                L"• Sakura Girl (Jeu)\n"
+                L"• Celebration (Victoire)\n\n"
+                L"???????????????????????\n\n"
+                L"© 2024 - Tous droits réservés\n"
+                L"Développé avec ?? et C++");
+        }
         return (INT_PTR)TRUE;
 
     case WM_COMMAND:

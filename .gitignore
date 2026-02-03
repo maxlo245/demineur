@@ -48,6 +48,22 @@ ipch/
 *.sbr
 *.tlb
 *.tli
+
+# =================================
+# ?? Fichiers Audio (Trop lourds pour Git)
+# =================================
+# Ne pas commit les fichiers audio
+sounds/*.mp3
+sounds/*.wav
+sounds/*.ogg
+sounds/*.flac
+
+# MAIS garder le README du dossier sounds
+!sounds/README.md
+
+# Exceptions : fichiers de test légers OK
+!sounds/*_test.wav
+# =================================
 *.tlh
 *.tmp
 *.tmp_proj

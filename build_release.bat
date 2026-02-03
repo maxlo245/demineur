@@ -1,0 +1,112 @@
+@echo off
+chcp 65001 >nul
+echo.
+echo ???????????????????????????????????????????????????????????
+echo   ?? BUILD COMPLET - DÉMINEUR HD
+echo ???????????????????????????????????????????????????????????
+echo.
+
+REM Vérifier si MSBuild existe
+where msbuild >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo ? ERREUR: MSBuild introuvable !
+    echo.
+    echo ?? Solutions:
+    echo    1. Ouvrez Visual Studio Developer Command Prompt
+    echo    2. OU utilisez Visual Studio pour compiler (Ctrl+Shift+B)
+    echo.
+    pause
+    exit /b 1
+)
+
+echo ?? Étape 1/4: Compilation en mode Release...
+echo.
+msbuild demineur.sln /p:Configuration=Release /p:Platform=x64 /v:minimal
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo ? ERREUR: Échec de la compilation !
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+echo ? Compilation réussie !
+echo.
+
+echo ?? Étape 2/4: Organisation des fichiers...
+echo.
+call organiser_projet.bat
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo ? ERREUR: Échec de l'organisation !
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+
+echo ?? Étape 3/4: Création du fichier VERSION...
+echo.
+(
+echo Démineur HD - Version 1.0
+echo Build: %DATE% %TIME%
+echo Configuration: Release x64
+echo.
+echo Fonctionnalités:
+echo - 4 niveaux de difficulté
+echo - 5 niveaux de qualité graphique
+echo - Audio professionnel (Kevin MacLeod)
+echo - Système de score et combos
+echo - 3 aides par partie
+echo.
+echo Développé avec C++ et Win32 API
+) > "Release\VERSION.txt"
+echo ? Fichier VERSION créé !
+echo.
+
+echo ?? Étape 4/4: Vérification des musiques...
+echo.
+if exist "Release\data\sounds\menu.mp3" (
+    echo ? menu.mp3 trouvé
+) else if exist "Release\data\sounds\menu.wav" (
+    echo ? menu.wav trouvé
+) else (
+    echo ??  menu.mp3/wav manquant
+)
+
+if exist "Release\data\sounds\game.mp3" (
+    echo ? game.mp3 trouvé
+) else if exist "Release\data\sounds\game.wav" (
+    echo ? game.wav trouvé
+) else (
+    echo ??  game.mp3/wav manquant
+)
+
+if exist "Release\data\sounds\win.mp3" (
+    echo ? win.mp3 trouvé
+) else if exist "Release\data\sounds\win.wav" (
+    echo ? win.wav trouvé
+) else (
+    echo ??  win.mp3/wav manquant
+)
+echo.
+
+echo ???????????????????????????????????????????????????????????
+echo   ? BUILD TERMINÉ AVEC SUCCÈS !
+echo ???????????????????????????????????????????????????????????
+echo.
+echo ?? Package prêt dans: Release\
+echo.
+echo ?? Contenu:
+dir /B "Release"
+echo.
+echo ?? Prochaines étapes:
+echo    1. Tester: Release\demineur.exe
+echo    2. ^(Optionnel^) Ajouter musiques dans Release\data\sounds\
+echo    3. Créer .zip pour distribution
+echo.
+echo ?? Commande pour créer le .zip:
+echo    cd Release
+echo    powershell Compress-Archive -Path * -DestinationPath ..\Demineur_HD_v1.0.zip
+echo.
+pause
