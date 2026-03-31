@@ -1,4 +1,4 @@
-// demineur.cpp : Jeu de démineur avancé
+// demineur.cpp : Jeu de demineur avance
 
 #include "framework.h"
 #include "demineur.h"
@@ -10,41 +10,37 @@
 #include <commctrl.h>
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "msimg32.lib") // ? Pour GradientFill
-#pragma comment(lib, "comctl32.lib") // Pour les contrôles communs (sliders)
+#pragma comment(lib, "comctl32.lib") // Pour les controles communs (sliders)
 
 #define MAX_LOADSTRING 100
 
 // Constantes du jeu
-const int BASE_CELL_SIZE = 40;  // Taille par défaut
+const int BASE_CELL_SIZE = 40;  // Taille par defaut
 const int HEADER_HEIGHT = 100;
 const int MARGIN = 15;
 const int FOOTER_HEIGHT = 100; // Zone pour le HUD en bas
 const int MAX_PARTICLES = 100;
 const int MAX_HINTS = 3;
 
-// Résolution fixe 1920x1080
-const int WINDOW_WIDTH = 1920;
-const int WINDOW_HEIGHT = 1080;
-
 // Variable dynamique pour la taille des cellules
 int CELL_SIZE = BASE_CELL_SIZE;
 
 // Fonction pour calculer la taille optimale des cellules
-int CalculateOptimalCellSize(int rows, int cols) {
-    int availableWidth = WINDOW_WIDTH - 2 * MARGIN - 50;  // Marges + espace
-    int availableHeight = WINDOW_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 4 * MARGIN - 50;
-    
+int CalculateOptimalCellSize(int rows, int cols, int windowWidth, int windowHeight) {
+    int availableWidth = windowWidth - 2 * MARGIN - 50;  // Marges + espace
+    int availableHeight = windowHeight - HEADER_HEIGHT - FOOTER_HEIGHT - 4 * MARGIN - 50;
+
     int maxCellSizeByWidth = availableWidth / cols;
     int maxCellSizeByHeight = availableHeight / rows;
-    
+
     int optimalSize = min(maxCellSizeByWidth, maxCellSizeByHeight);
-    optimalSize = min(optimalSize, BASE_CELL_SIZE); // Ne jamais dépasser 40px
+    optimalSize = min(optimalSize, BASE_CELL_SIZE); // Ne jamais depasser 40px
     optimalSize = max(optimalSize, 20); // Minimum 20px pour rester lisible
-    
+
     return optimalSize;
 }
 
-// Niveaux de difficulté
+// Niveaux de difficulte
 enum Difficulty {
     FACILE = 0,
     MOYEN = 1,
@@ -64,7 +60,7 @@ const DifficultySettings DIFFICULTIES[] = {
     {16, 16, 40},    // Moyen
     {16, 30, 99},    // Difficile
     {24, 30, 180},   // Expert
-    {0, 0, 0}        // Personnalisé
+    {0, 0, 0}        // Personnalise
 };
 
 // Modes de jeu
@@ -75,7 +71,7 @@ enum GameMode {
     ZEN_MODE = 3
 };
 
-// Thèmes visuels
+// Themes visuels
 enum Theme {
     THEME_DARK = 0,
     THEME_LIGHT = 1,
@@ -84,13 +80,13 @@ enum Theme {
     THEME_SUNSET = 4
 };
 
-// ?? QUALITÉ GRAPHIQUE ??
+// ?? QUALITE GRAPHIQUE ??
 enum GraphicsQuality {
-    QUALITY_MINIMAL = 0,      // Très Faible - Performance maximale
+    QUALITY_MINIMAL = 0,      // Tres Faible - Performance maximale
     QUALITY_LOW = 1,          // Faible - Bon pour PC anciens
-    QUALITY_MEDIUM = 2,       // Moyen - Équilibré (par défaut)
-    QUALITY_HIGH = 3,         // Élevé - Qualité supérieure
-    QUALITY_ULTRA = 4         // Ultra - Maximum de détails
+    QUALITY_MEDIUM = 2,       // Moyen - Equilibre (par defaut)
+    QUALITY_HIGH = 3,         // Eleve - Qualite superieure
+    QUALITY_ULTRA = 4         // Ultra - Maximum de details
 };
 
 struct QualitySettings {
@@ -116,14 +112,14 @@ const QualitySettings QUALITY_PRESETS[] = {
     // LOW - Faible
     {true, false, 15, 10, 1, 2, 1, 2, 8, 0, false, L"Bon pour PC anciens"},
     
-    // MEDIUM - Équilibré (par défaut)
-    {true, true, 30, 20, 2, 3, 2, 3, 15, 1, true, L"Équilibré qualité/performance"},
+    // MEDIUM - Equilibre (par defaut)
+    {true, true, 30, 20, 2, 3, 2, 3, 15, 1, true, L"Equilibre qualite/performance"},
     
-    // HIGH - Qualité supérieure
-    {true, true, 40, 25, 2, 4, 3, 3, 15, 2, true, L"Qualité supérieure"},
+    // HIGH - Qualite superieure
+    {true, true, 40, 25, 2, 4, 3, 3, 15, 2, true, L"Qualite superieure"},
     
     // ULTRA - Maximum
-    {true, true, 50, 30, 3, 5, 3, 5, 30, 2, true, L"Maximum de détails"}
+    {true, true, 50, 30, 3, 5, 3, 5, 30, 2, true, L"Maximum de details"}
 };
 
 // État d'une cellule
@@ -159,7 +155,7 @@ struct GameStats {
     int gamesWon;
     int gamesLost;
     int totalTime;
-    int bestTime[5];  // Par difficulté
+    int bestTime[5];  // Par difficulte
     int currentStreak;
     int longestStreak;
     int flagsUsed;
@@ -178,7 +174,9 @@ struct GameConfig {
     float zoomLevel;
     int musicVolume;      // 0-100
     int sfxVolume;        // 0-100
-    GraphicsQuality graphicsQuality;  // ?? Qualité graphique
+    GraphicsQuality graphicsQuality;  // ?? Qualite graphique
+    int windowWidth;      // Largeur de la fenetre
+    int windowHeight;     // Hauteur de la fenetre
 };
 
 // Types de sons
@@ -208,7 +206,7 @@ HINSTANCE hInst;
 WCHAR szTitle[MAX_LOADSTRING];
 WCHAR szWindowClass[MAX_LOADSTRING];
 
-// Cache d'objets GDI pour la performance (évite de créer/détruire en boucle)
+// Cache d'objets GDI pour la performance (evite de creer/detruire en boucle)
 static HBRUSH g_brushGray = NULL;
 static HBRUSH g_brushLightGray = NULL;
 static HBRUSH g_brushDarkGray = NULL;
@@ -220,17 +218,17 @@ static HPEN g_penBlack = NULL;
 static HFONT g_fontDigital = NULL;
 static HFONT g_fontCell = NULL;
 
-// ? CACHE ÉTENDU POUR PERFORMANCE ?
-static HBRUSH g_cachedBrushes[256] = {NULL}; // Cache de 256 brushes réutilisables
-static HPEN g_cachedPens[64] = {NULL};       // Cache de 64 pens réutilisables
+// ? CACHE ETENDU POUR PERFORMANCE ?
+static HBRUSH g_cachedBrushes[256] = {NULL}; // Cache de 256 brushes reutilisables
+static HPEN g_cachedPens[64] = {NULL};       // Cache de 64 pens reutilisables
 static int g_brushCacheSize = 0;
 static int g_penCacheSize = 0;
 
-// Cache pour les dégradés (pré-calculés)
+// Cache pour les degrades (pre-calcules)
 static HBITMAP g_gradientCache[10] = {NULL};
 static bool g_gradientCacheInitialized = false;
 
-// État du jeu
+// Etat du jeu
 enum GameState {
     STATE_MENU,
     STATE_PLAYING,
@@ -251,10 +249,10 @@ std::chrono::steady_clock::time_point startTime;
 int elapsedSeconds = 0;
 GameState gameState = STATE_MENU;
 
-// Variables avancées
+// Variables avancees
 std::vector<Particle> particles;
 GameStats playerStats = {0};
-GameConfig gameConfig = {true, true, true, false, true, THEME_DARK, CLASSIC, 1.0f, 70, 80, QUALITY_MEDIUM}; // ?? Medium par défaut
+GameConfig gameConfig = {true, true, true, false, true, THEME_DARK, CLASSIC, 1.0f, 70, 80, QUALITY_MEDIUM, 1920, 1080}; // ?? Medium par defaut, 1920x1080
 int hintsRemaining = MAX_HINTS;
 std::vector<std::pair<int, int>> moveHistory;
 bool showingHint = false;
@@ -269,17 +267,17 @@ int lastRevealedCount = 0;
 MusicTrack currentMusic = MUSIC_COUNT;
 bool isMusicPlaying = false;
 
-// Variables pour le menu animé
+// Variables pour le menu anime
 float menuAnimationTime = 0.0f;
 std::vector<Particle> menuParticles;
 const int MAX_MENU_PARTICLES = 50;
 
-// ??? Variables pour le fond de jeu animé ???
+// ??? Variables pour le fond de jeu anime ???
 float gameBackgroundTime = 0.0f;
 std::vector<Particle> gameBackgroundParticles;
 const int MAX_BACKGROUND_PARTICLES = 30;
 
-// ? FONCTIONS OPTIMISÉES POUR CACHE GDI ?
+// ? FONCTIONS OPTIMISEES POUR CACHE GDI ?
 
 // Obtenir un brush depuis le cache (ou créer si nécessaire)
 HBRUSH GetCachedBrush(COLORREF color) {
@@ -294,7 +292,7 @@ HBRUSH GetCachedBrush(COLORREF color) {
         }
     }
     
-    // Créer nouveau brush et l'ajouter au cache
+    // Creer nouveau brush et l'ajouter au cache
     if (g_brushCacheSize < 256) {
         g_cachedBrushes[g_brushCacheSize] = CreateSolidBrush(color);
         return g_cachedBrushes[g_brushCacheSize++];
@@ -317,7 +315,7 @@ HPEN GetCachedPen(int width, COLORREF color) {
         }
     }
     
-    // Créer nouveau pen
+    // Creer nouveau pen
     if (g_penCacheSize < 64) {
         g_cachedPens[g_penCacheSize] = CreatePen(PS_SOLID, width, color);
         return g_cachedPens[g_penCacheSize++];
@@ -326,7 +324,7 @@ HPEN GetCachedPen(int width, COLORREF color) {
     return CreatePen(PS_SOLID, width, color);
 }
 
-// Vider le cache étendu
+// Vider le cache etendu
 void ClearExtendedCache() {
     for (int i = 0; i < g_brushCacheSize; i++) {
         if (g_cachedBrushes[i]) DeleteObject(g_cachedBrushes[i]);
@@ -342,7 +340,7 @@ void ClearExtendedCache() {
     g_gradientCacheInitialized = false;
 }
 
-// Déclarations de fonctions
+// Declarations de fonctions
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -366,7 +364,7 @@ void DrawGradientRect(HDC hdc, RECT rect, COLORREF color1, COLORREF color2, bool
 void InitGDICache();
 void CleanupGDICache();
 
-// Déclarations des fonctions audio
+// Declarations des fonctions audio
 void PlaySoundEffect(SoundEffect sfx);
 void PlayBackgroundMusic(MusicTrack track);
 void StopMusic();
@@ -374,7 +372,7 @@ void SetMusicVolume(int volume);
 void SetSFXVolume(int volume);
 void ToggleAudio();
 
-// Stubs pour fonctions avancées - IMPLÉMENTATIONS RÉELLES
+// Stubs pour fonctions avancees - IMPLEMENTATIONS REELLES
 void InitParticles() { 
     particles.clear(); 
     particles.resize(MAX_PARTICLES); 
@@ -386,8 +384,8 @@ void InitParticles() {
     
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> distX(0.0, (double)WINDOW_WIDTH);
-    std::uniform_real_distribution<> distY(0.0, (double)WINDOW_HEIGHT);
+    std::uniform_real_distribution<> distX(0.0, (double)gameConfig.windowWidth);
+    std::uniform_real_distribution<> distY(0.0, (double)gameConfig.windowHeight);
     std::uniform_real_distribution<> distSpeed(-0.5, 0.5);
     
     COLORREF menuColors[] = {
@@ -434,7 +432,7 @@ void UpdateParticles() {
         if (p.active) {
             p.x += p.vx;
             p.y += p.vy;
-            p.vy += 0.5f; // Gravité
+            p.vy += 0.5f; // Gravite
             p.life--;
             
             if (p.life <= 0) {
@@ -454,22 +452,22 @@ void UpdateMenuParticles() {
     for (size_t i = updateOffset; i < menuParticles.size(); i += 2) {
         auto& p = menuParticles[i];
         if (p.active) {
-            // Mouvement sinusoïdal pour effet de flottement
+            // Mouvement sinusoidal pour effet de flottement
             p.x += p.vx + sin(menuAnimationTime * 2.0f + p.y * 0.01f) * 0.2f;
             p.y += p.vy + cos(menuAnimationTime * 1.5f + p.x * 0.01f) * 0.2f;
-            
+
             // Rebondir sur les bords
-            if (p.x < 0 || p.x > WINDOW_WIDTH) p.vx *= -1;
-            if (p.y < 0 || p.y > WINDOW_HEIGHT) p.vy *= -1;
-            
+            if (p.x < 0 || p.x > gameConfig.windowWidth) p.vx *= -1;
+            if (p.y < 0 || p.y > gameConfig.windowHeight) p.vy *= -1;
+
             // Garder dans les limites
-            p.x = max(0.0f, min((float)WINDOW_WIDTH, p.x));
-            p.y = max(0.0f, min((float)WINDOW_HEIGHT, p.y));
+            p.x = max(0.0f, min((float)gameConfig.windowWidth, p.x));
+            p.y = max(0.0f, min((float)gameConfig.windowHeight, p.y));
         }
     }
 }
 
-// ??? Fonction pour mettre à jour les particules du fond de jeu ???
+// ??? Fonction pour mettre a jour les particules du fond de jeu ???
 void UpdateGameBackgroundParticles() {
     gameBackgroundTime += 0.016f; // ~60 FPS
     
@@ -483,14 +481,14 @@ void UpdateGameBackgroundParticles() {
             // Mouvement lent et fluide
             p.x += p.vx + sin(gameBackgroundTime * 1.0f + p.y * 0.005f) * 0.3f;
             p.y += p.vy + cos(gameBackgroundTime * 0.8f + p.x * 0.005f) * 0.3f;
-            
+
             // Rebondir sur les bords
-            if (p.x < 0 || p.x > WINDOW_WIDTH) p.vx *= -1;
-            if (p.y < 0 || p.y > WINDOW_HEIGHT) p.vy *= -1;
-            
+            if (p.x < 0 || p.x > gameConfig.windowWidth) p.vx *= -1;
+            if (p.y < 0 || p.y > gameConfig.windowHeight) p.vy *= -1;
+
             // Garder dans les limites
-            p.x = max(0.0f, min((float)WINDOW_WIDTH, p.x));
-            p.y = max(0.0f, min((float)WINDOW_HEIGHT, p.y));
+            p.x = max(0.0f, min((float)gameConfig.windowWidth, p.x));
+            p.y = max(0.0f, min((float)gameConfig.windowHeight, p.y));
         }
     }
 }
@@ -861,9 +859,9 @@ void ToggleSound() { gameConfig.soundEnabled = !gameConfig.soundEnabled; }
 void SetZoomLevel(float zoom) { gameConfig.zoomLevel = zoom; }
 void ToggleAutoFlag() { gameConfig.autoFlag = !gameConfig.autoFlag; }
 
-// ?? FONCTIONS DE QUALITÉ GRAPHIQUE ??
+// ?? FONCTIONS DE QUALITE GRAPHIQUE ??
 
-// Appliquer un niveau de qualité
+// Appliquer un niveau de qualite
 void ApplyGraphicsQuality(GraphicsQuality quality) {
     gameConfig.graphicsQuality = quality;
     const QualitySettings& settings = QUALITY_PRESETS[quality];
@@ -871,7 +869,7 @@ void ApplyGraphicsQuality(GraphicsQuality quality) {
     gameConfig.particlesEnabled = settings.particlesEnabled;
     gameConfig.animationsEnabled = settings.animationsEnabled;
     
-    // Réajuster le nombre de particules
+    // Reajuster le nombre de particules
     if (settings.particlesEnabled) {
         // Particules du menu
         menuParticles.resize(settings.menuParticleCount);
@@ -886,52 +884,208 @@ void ApplyGraphicsQuality(GraphicsQuality quality) {
     }
 }
 
-// Obtenir les paramètres de qualité actuels
+// Obtenir les parametres de qualite actuels
 const QualitySettings& GetCurrentQualitySettings() {
     return QUALITY_PRESETS[gameConfig.graphicsQuality];
 }
 
-// Obtenir le nom d'un niveau de qualité
+// Obtenir le nom d'un niveau de qualite
 const wchar_t* GetQualityName(GraphicsQuality quality) {
     switch(quality) {
-        case QUALITY_MINIMAL: return L"Très Faible";
+        case QUALITY_MINIMAL: return L"Tres Faible";
         case QUALITY_LOW: return L"Faible";
         case QUALITY_MEDIUM: return L"Moyen";
-        case QUALITY_HIGH: return L"Élevé";
+        case QUALITY_HIGH: return L"Eleve";
         case QUALITY_ULTRA: return L"Ultra";
         default: return L"Inconnu";
     }
 }
 
-// Afficher le menu d'options simplifié
-void ShowOptionsDialog(HWND hWndParent) {
-    // Créer un message avec les options actuelles
-    WCHAR message[1024];
-    swprintf_s(message, 
-        L"=== OPTIONS ===\n\n"
-        L"QUALITE GRAPHIQUE\n"
-        L"Actuel: %s\n\n"
-        L"Changez avec les touches 1-5:\n"
-        L"  [1] Tres Faible - Performance Max\n"
-        L"  [2] Faible - PC Anciens\n"
-        L"  [3] Moyen - Recommande\n"
-        L"  [4] Eleve - Qualite Sup.\n"
-        L"  [5] Ultra - Max Details\n\n"
-        L"AUDIO\n"
-        L"  Volume Musique: %d%%\n"
-        L"  Volume Effets: %d%%\n"
-        L"  Statut: %s\n\n"
-        L"RACCOURCIS:\n"
-        L"  [M] Activer/Desactiver audio\n"
-        L"  [+/-] Ajuster volume (bientot)\n\n"
-        L"RESOLUTION: 1920x1080 (Fixe)\n",
-        GetQualityName(gameConfig.graphicsQuality),
-        gameConfig.musicVolume,
-        gameConfig.sfxVolume,
-        gameConfig.soundEnabled ? L"Active" : L"Desactive"
-    );
+// Variables temporaires pour le dialogue d'options
+struct TempOptions {
+    GraphicsQuality quality;
+    int musicVolume;
+    int sfxVolume;
+    bool soundEnabled;
+    int resolutionIndex;
+};
 
-    MessageBox(hWndParent, message, L"Options", MB_OK | MB_ICONINFORMATION);
+TempOptions tempOptions;
+
+// Table des resolutions disponibles
+struct Resolution {
+    int width;
+    int height;
+    const wchar_t* name;
+};
+
+const Resolution availableResolutions[] = {
+    {640, 480, L"640x480 (480p)"},
+    {800, 600, L"800x600"},
+    {1024, 768, L"1024x768"},
+    {1280, 720, L"1280x720 (720p)"},
+    {1366, 768, L"1366x768"},
+    {1600, 900, L"1600x900"},
+    {1920, 1080, L"1920x1080 (1080p)"},
+    {2560, 1440, L"2560x1440 (1440p)"},
+    {3840, 2160, L"3840x2160 (4K)"}
+};
+
+const int numResolutions = sizeof(availableResolutions) / sizeof(Resolution);
+
+// Trouver l'index de la resolution actuelle
+int GetCurrentResolutionIndex() {
+    for (int i = 0; i < numResolutions; i++) {
+        if (availableResolutions[i].width == gameConfig.windowWidth &&
+            availableResolutions[i].height == gameConfig.windowHeight) {
+            return i;
+        }
+    }
+    return 6; // Default 1920x1080
+}
+
+// Procédure de dialogue pour les options
+INT_PTR CALLBACK OptionsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+        case WM_INITDIALOG:
+        {
+            // Initialiser les valeurs temporaires
+            tempOptions.quality = gameConfig.graphicsQuality;
+            tempOptions.musicVolume = gameConfig.musicVolume;
+            tempOptions.sfxVolume = gameConfig.sfxVolume;
+            tempOptions.soundEnabled = gameConfig.soundEnabled;
+            tempOptions.resolutionIndex = GetCurrentResolutionIndex();
+
+            // Remplir la combo box de qualite (sans accents)
+            HWND hCombo = GetDlgItem(hDlg, IDC_QUALITY_COMBO);
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Tres Faible - Performance Max");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Faible - PC Anciens");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Moyen - Recommande");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Eleve - Qualite Superieure");
+            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Ultra - Maximum Details");
+            SendMessage(hCombo, CB_SETCURSEL, (WPARAM)tempOptions.quality, 0);
+
+            // Remplir la combo box de resolution
+            HWND hResCombo = GetDlgItem(hDlg, IDC_RESOLUTION_COMBO);
+            for (int i = 0; i < numResolutions; i++) {
+                SendMessage(hResCombo, CB_ADDSTRING, 0, (LPARAM)availableResolutions[i].name);
+            }
+            SendMessage(hResCombo, CB_SETCURSEL, (WPARAM)tempOptions.resolutionIndex, 0);
+
+            // Configurer les sliders
+            HWND hMusicSlider = GetDlgItem(hDlg, IDC_MUSIC_SLIDER);
+            SendMessage(hMusicSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+            SendMessage(hMusicSlider, TBM_SETPOS, TRUE, tempOptions.musicVolume);
+
+            HWND hSfxSlider = GetDlgItem(hDlg, IDC_SFX_SLIDER);
+            SendMessage(hSfxSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+            SendMessage(hSfxSlider, TBM_SETPOS, TRUE, tempOptions.sfxVolume);
+
+            // Mettre à jour les labels
+            WCHAR buffer[32];
+            swprintf_s(buffer, L"%d%%", tempOptions.musicVolume);
+            SetDlgItemText(hDlg, IDC_MUSIC_LABEL, buffer);
+            swprintf_s(buffer, L"%d%%", tempOptions.sfxVolume);
+            SetDlgItemText(hDlg, IDC_SFX_LABEL, buffer);
+
+            // Bouton audio
+            SetDlgItemText(hDlg, IDC_FULLSCREEN_CHECK, tempOptions.soundEnabled ? L"Audio ON" : L"Audio OFF");
+
+            return TRUE;
+        }
+
+        case WM_HSCROLL:
+        {
+            // Détecter quel slider a bougé
+            HWND hSlider = (HWND)lParam;
+            int pos = (int)SendMessage(hSlider, TBM_GETPOS, 0, 0);
+            WCHAR buffer[32];
+
+            if (hSlider == GetDlgItem(hDlg, IDC_MUSIC_SLIDER)) {
+                tempOptions.musicVolume = pos;
+                swprintf_s(buffer, L"%d%%", pos);
+                SetDlgItemText(hDlg, IDC_MUSIC_LABEL, buffer);
+            }
+            else if (hSlider == GetDlgItem(hDlg, IDC_SFX_SLIDER)) {
+                tempOptions.sfxVolume = pos;
+                swprintf_s(buffer, L"%d%%", pos);
+                SetDlgItemText(hDlg, IDC_SFX_LABEL, buffer);
+            }
+            return TRUE;
+        }
+
+        case WM_COMMAND:
+        {
+            switch (LOWORD(wParam)) {
+                case IDC_QUALITY_COMBO:
+                    if (HIWORD(wParam) == CBN_SELCHANGE) {
+                        HWND hCombo = GetDlgItem(hDlg, IDC_QUALITY_COMBO);
+                        int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+                        tempOptions.quality = (GraphicsQuality)sel;
+                    }
+                    return TRUE;
+
+                case IDC_RESOLUTION_COMBO:
+                    if (HIWORD(wParam) == CBN_SELCHANGE) {
+                        HWND hCombo = GetDlgItem(hDlg, IDC_RESOLUTION_COMBO);
+                        int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+                        tempOptions.resolutionIndex = sel;
+                    }
+                    return TRUE;
+
+                case IDC_FULLSCREEN_CHECK:
+                {
+                    tempOptions.soundEnabled = !tempOptions.soundEnabled;
+                    SetDlgItemText(hDlg, IDC_FULLSCREEN_CHECK, tempOptions.soundEnabled ? L"Audio ON" : L"Audio OFF");
+                    return TRUE;
+                }
+
+                case IDOK:
+                {
+                    // Verifier si la resolution a change
+                    bool resolutionChanged = false;
+                    if (tempOptions.resolutionIndex >= 0 && tempOptions.resolutionIndex < numResolutions) {
+                        const Resolution& newRes = availableResolutions[tempOptions.resolutionIndex];
+                        if (newRes.width != gameConfig.windowWidth || newRes.height != gameConfig.windowHeight) {
+                            gameConfig.windowWidth = newRes.width;
+                            gameConfig.windowHeight = newRes.height;
+                            resolutionChanged = true;
+                        }
+                    }
+
+                    // Appliquer les changements
+                    gameConfig.graphicsQuality = tempOptions.quality;
+                    gameConfig.musicVolume = tempOptions.musicVolume;
+                    gameConfig.sfxVolume = tempOptions.sfxVolume;
+                    gameConfig.soundEnabled = tempOptions.soundEnabled;
+
+                    // Appliquer les paramètres audio
+                    if (!gameConfig.soundEnabled) {
+                        PlaySound(NULL, NULL, 0); // Arrêter tous les sons
+                    }
+
+                    // Informer l'utilisateur si la resolution a change
+                    if (resolutionChanged) {
+                        MessageBox(hDlg, L"Veuillez redemarrer le jeu pour appliquer la nouvelle resolution.", L"Resolution modifiee", MB_OK | MB_ICONINFORMATION);
+                    }
+
+                    EndDialog(hDlg, IDOK);
+                    return TRUE;
+                }
+
+                case IDCANCEL:
+                    EndDialog(hDlg, IDCANCEL);
+                    return TRUE;
+            }
+            break;
+        }
+    }
+    return FALSE;
+}
+
+// Afficher le dialogue d'options
+void ShowOptionsDialog(HWND hWndParent) {
+    DialogBox(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_OPTIONS), hWndParent, OptionsDialogProc);
 }
 
 // ============================================
@@ -1201,22 +1355,22 @@ void InitializeGame(int difficulty)
 {
     currentDifficulty = difficulty;
     const DifficultySettings& settings = DIFFICULTIES[difficulty];
-    
+
     rows = settings.rows;
     cols = settings.cols;
     totalMines = settings.mines;
-    
+
     // ??? CALCULER LA TAILLE OPTIMALE DES CELLULES ???
-    CELL_SIZE = CalculateOptimalCellSize(rows, cols);
-    
-    // Recréer la police pour les cellules avec la nouvelle taille
+    CELL_SIZE = CalculateOptimalCellSize(rows, cols, gameConfig.windowWidth, gameConfig.windowHeight);
+
+    // Recreer la police pour les cellules avec la nouvelle taille
     if (g_fontCell) {
         DeleteObject(g_fontCell);
         g_fontCell = CreateFont(CELL_SIZE - 8, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
     }
-    
+
     grid.clear();
     grid.resize(rows, std::vector<Cell>(cols));
     
@@ -1848,18 +2002,18 @@ void DrawGameOverMenu(HDC hdc, int width, int height) {
         // Ombre
         SetTextColor(hdc, RGB(0, 100, 0));
         RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
-        DrawText(hdc, L"? VICTOIRE !", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(hdc, L"VICTOIRE !", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         SetTextColor(hdc, RGB(76, 175, 80));
-        DrawText(hdc, L"? VICTOIRE !", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(hdc, L"VICTOIRE !", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
         // Ombre
         SetTextColor(hdc, RGB(100, 0, 0));
         RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
-        DrawText(hdc, L"? GAME OVER", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(hdc, L"GAME OVER", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         SetTextColor(hdc, RGB(244, 67, 54));
-        DrawText(hdc, L"? GAME OVER", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(hdc, L"GAME OVER", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     DeleteObject(titleFont);
 
@@ -1890,9 +2044,9 @@ void DrawGameOverMenu(HDC hdc, int width, int height) {
     RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 2 * (buttonHeight + buttonSpacing),
                        panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 3 * buttonHeight + 2 * buttonSpacing};
 
-    DrawMenuButton(hdc, replayButton, L"?? REJOUER", false);
-    DrawMenuButton(hdc, optionsButton, L"? OPTIONS", false);
-    DrawMenuButton(hdc, menuButton, L"?? MENU", false);
+    DrawMenuButton(hdc, replayButton, L"REJOUER", false);
+    DrawMenuButton(hdc, optionsButton, L"OPTIONS", false);
+    DrawMenuButton(hdc, menuButton, L"MENU", false);
 }
 
 // Dessiner le menu de pause
@@ -1934,10 +2088,10 @@ void DrawPauseMenu(HDC hdc, int width, int height) {
     // Ombre
     SetTextColor(hdc, RGB(100, 100, 0));
     RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
-    DrawText(hdc, L"? PAUSE", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DrawText(hdc, L"PAUSE", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     SetTextColor(hdc, RGB(255, 255, 0));
-    DrawText(hdc, L"? PAUSE", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DrawText(hdc, L"PAUSE", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     DeleteObject(titleFont);
 
     // Sous-titre
@@ -1966,10 +2120,10 @@ void DrawPauseMenu(HDC hdc, int width, int height) {
     RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 3 * (buttonHeight + buttonSpacing),
                        panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 4 * buttonHeight + 3 * buttonSpacing};
 
-    DrawMenuButton(hdc, resumeButton, L"? REPRENDRE", false);
-    DrawMenuButton(hdc, restartButton, L"?? RECOMMENCER", false);
-    DrawMenuButton(hdc, optionsButton, L"? OPTIONS", false);
-    DrawMenuButton(hdc, menuButton, L"?? MENU", false);
+    DrawMenuButton(hdc, resumeButton, L"REPRENDRE", false);
+    DrawMenuButton(hdc, restartButton, L"RECOMMENCER", false);
+    DrawMenuButton(hdc, optionsButton, L"OPTIONS", false);
+    DrawMenuButton(hdc, menuButton, L"MENU", false);
 }
 
 void DrawMenu(HDC hdc, HWND hWnd) {
@@ -1978,15 +2132,15 @@ GetClientRect(hWnd, &clientRect);
 int width = clientRect.right;
 int height = clientRect.bottom;
     
-// ?? Récupérer les paramètres de qualité
+// ?? Recuperer les parametres de qualite
 const QualitySettings& quality = GetCurrentQualitySettings();
-    
-// Fond avec dégradé bleu foncé ANIMÉ
+
+// Fond avec degrade bleu fonce ANIME
 COLORREF color1 = RGB(41 + (int)(sin(menuAnimationTime) * 10), 128, 185);
 COLORREF color2 = RGB(109, 213 + (int)(cos(menuAnimationTime * 0.7f) * 10), 250);
 DrawGradientRect(hdc, clientRect, color1, color2, true);
     
-// ?? Effet de flou selon qualité
+// ?? Effet de flou selon qualite
 if (quality.menuBlurLayers > 0) {
     for (int layer = 0; layer < quality.menuBlurLayers; layer++) {
         for (int i = 0; i < 8; i++) {
@@ -2008,7 +2162,7 @@ if (quality.menuBlurLayers > 0) {
     }
 }
     
-// ?? Particules selon qualité
+// ?? Particules selon qualite
 if (quality.particlesEnabled && quality.menuParticleCount > 0) {
     for (const auto& p : menuParticles) {
         if (p.active) {
@@ -2024,7 +2178,7 @@ if (quality.particlesEnabled && quality.menuParticleCount > 0) {
     }
 }
     
-// ?? Vignette selon qualité
+// ?? Vignette selon qualite
 if (quality.menuBlurLayers > 0) {
     for (int i = 0; i < 100; i += 20) {
         int alpha = 10 + i / 20;
@@ -2045,30 +2199,30 @@ HFONT oldFont = (HFONT)SelectObject(hdc, titleFont);
 SetBkMode(hdc, TRANSPARENT);
 RECT titleRect = {0, 100, width, 250};
     
-// ?? Effet de lueur selon qualité
+// ?? Effet de lueur selon qualite
 int glowLayers = quality.titleGlowLayers;
 for (int glow = glowLayers * 2; glow > 0; glow -= 4) {
     int glowIntensity = 100 + glow * 10 + (int)(sin(menuAnimationTime * 2.0f) * 20);
     RECT glowRect = {titleRect.left - glow, titleRect.top - glow, 
                     titleRect.right + glow, titleRect.bottom + glow};
     SetTextColor(hdc, RGB(glowIntensity, 150 + glow * 5, 255));
-    DrawText(hdc, L"?? DÉMINEUR", -1, &glowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DrawText(hdc, L"DEMINEUR HD", -1, &glowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
-    
-// Ombre portée noire
+
+// Ombre portee noire
 SetTextColor(hdc, RGB(0, 0, 0));
 RECT titleShadow = {titleRect.left + 5, titleRect.top + 5, titleRect.right + 5, titleRect.bottom + 5};
-DrawText(hdc, L"?? DÉMINEUR", -1, &titleShadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    
-// Titre principal blanc éclatant
+DrawText(hdc, L"DEMINEUR HD", -1, &titleShadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+// Titre principal blanc eclatant
 SetTextColor(hdc, RGB(255, 255, 255));
-DrawText(hdc, L"?? DÉMINEUR", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+DrawText(hdc, L"DEMINEUR HD", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     
 SelectObject(hdc, oldFont);
 DeleteObject(titleFont);
     
     
-    // Sous-titre ANIMÉ avec pulsation
+    // Sous-titre ANIME avec pulsation
     HFONT subtitleFont = CreateFont(32, 0, 0, 0, FW_NORMAL, TRUE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
@@ -2078,9 +2232,9 @@ DeleteObject(titleFont);
     int subtitleAlpha = 200 + (int)(sin(menuAnimationTime * 2.0f) * 55);
     SetTextColor(hdc, RGB(subtitleAlpha, subtitleAlpha, subtitleAlpha + 20));
     
-    // ?? Afficher la qualité graphique actuelle
+    // ?? Afficher la qualite graphique actuelle
     WCHAR subtitle[256];
-    swprintf_s(subtitle, L"Version Ultra HD 1920×1080 • Qualité: %s ??", GetQualityName(gameConfig.graphicsQuality));
+    swprintf_s(subtitle, L"Version Ultra HD 1920x1080 - Qualite: %s", GetQualityName(gameConfig.graphicsQuality));
     DrawText(hdc, subtitle, -1, &subtitleRect, DT_CENTER | DT_SINGLELINE);
     
     DeleteObject(subtitleFont);
@@ -2102,7 +2256,7 @@ DeleteObject(titleFont);
     RECT quitButton = {centerX - buttonWidth/2, startY + 2*(buttonHeight + buttonSpacing), 
                        centerX + buttonWidth/2, startY + 3*buttonHeight + 2*buttonSpacing};
     
-    // ?? Aura selon qualité
+    // ?? Aura selon qualite
     int auraLayers = quality.buttonAuraLayers;
     for (int aura = auraLayers; aura > 0; aura--) {
         HPEN auraPen = GetCachedPen(2, RGB(100 + aura * 30, 255 - aura * 30, 100));
@@ -2113,11 +2267,11 @@ DeleteObject(titleFont);
         SelectObject(hdc, oldPen);
     }
     
-    DrawMenuButton(hdc, playButton, L"? JOUER", false);
-    DrawMenuButton(hdc, optionsButton, L"? OPTIONS", false);
-    DrawMenuButton(hdc, quitButton, L"? QUITTER", false);
-    
-    // ????? Footer ANIMÉ avec pulsation ?????
+    DrawMenuButton(hdc, playButton, L"JOUER", false);
+    DrawMenuButton(hdc, optionsButton, L"OPTIONS", false);
+    DrawMenuButton(hdc, quitButton, L"QUITTER", false);
+
+    // ????? Footer ANIME avec pulsation ?????
     HFONT footerFont = CreateFont(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
@@ -2126,12 +2280,12 @@ DeleteObject(titleFont);
     RECT footerRect = {0, height - 60, width, height - 20};
     int footerAlpha = 150 + (int)(cos(menuAnimationTime * 1.5f) * 50);
     SetTextColor(hdc, RGB(footerAlpha, footerAlpha + 10, footerAlpha + 20));
-    DrawText(hdc, L"Cliquez sur JOUER pour commencer • Utilisez le menu Difficulté pour choisir votre niveau ??", 
+    DrawText(hdc, L"Cliquez sur JOUER pour commencer - Utilisez le menu Difficulte pour choisir votre niveau", 
              -1, &footerRect, DT_CENTER | DT_SINGLELINE);
     
     DeleteObject(footerFont);
     
-    // ?? Indicateur audio en bas à droite
+    // ?? Indicateur audio en bas a droite
     RECT audioRect = {width - 200, height - 100, width - 20, height - 70};
     HFONT audioFont = CreateFont(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -2141,10 +2295,10 @@ DeleteObject(titleFont);
     SetBkMode(hdc, TRANSPARENT);
     if (gameConfig.soundEnabled) {
         SetTextColor(hdc, RGB(76, 175, 80)); // Vert
-        DrawText(hdc, L"?? AUDIO ON", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+        DrawText(hdc, L"AUDIO ON", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
     } else {
         SetTextColor(hdc, RGB(244, 67, 54)); // Rouge
-        DrawText(hdc, L"?? AUDIO OFF", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
+        DrawText(hdc, L"AUDIO OFF", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
     }
     DeleteObject(audioFont);
     
@@ -2305,14 +2459,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    InitializeGame(currentDifficulty);
    LoadStats();
-   
+
    // Initialiser le cache GDI
    InitGDICache();
 
-   // Résolution fixe 1920x1080 - Calculer la taille de fenêtre avec bordures
-   RECT windowRect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
+   // Calculer la taille de fenêtre avec bordures
+   RECT windowRect = {0, 0, gameConfig.windowWidth, gameConfig.windowHeight};
    AdjustWindowRect(&windowRect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, TRUE);
-   
+
    int windowWidth = windowRect.right - windowRect.left;
    int windowHeight = windowRect.bottom - windowRect.top;
 
