@@ -20,6 +20,18 @@
 #define IDM_DIFFICULTY_DIFFICILE 112
 #define IDM_DIFFICULTY_EXPERT   113
 
+// Dialog d'options
+#define IDD_OPTIONS             114
+#define IDC_QUALITY_COMBO       1001
+#define IDC_RESOLUTION_COMBO    1002
+#define IDC_MUSIC_SLIDER        1003
+#define IDC_SFX_SLIDER          1004
+#define IDC_MUSIC_LABEL         1005
+#define IDC_SFX_LABEL           1006
+#define IDC_QUALITY_LABEL       1007
+#define IDC_RESOLUTION_LABEL    1008
+#define IDC_FULLSCREEN_CHECK    1009
+
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
 #endif

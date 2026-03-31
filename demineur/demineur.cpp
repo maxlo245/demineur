@@ -7,8 +7,10 @@
 #include <chrono>
 #include <cmath>
 #include <mmsystem.h>
+#include <commctrl.h>
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "msimg32.lib") // ? Pour GradientFill
+#pragma comment(lib, "comctl32.lib") // Pour les contrôles communs (sliders)
 
 #define MAX_LOADSTRING 100
 
@@ -901,47 +903,35 @@ const wchar_t* GetQualityName(GraphicsQuality quality) {
     }
 }
 
-// ?? Afficher la boîte de dialogue des options (simplifiée)
+// Afficher le menu d'options simplifié
 void ShowOptionsDialog(HWND hWndParent) {
+    // Créer un message avec les options actuelles
     WCHAR message[1024];
     swprintf_s(message, 
-        L"?? OPTIONS DE QUALITÉ GRAPHIQUE\n\n"
-        L"????????????????????????????????????????\n\n"
-        L"Qualité actuelle : %s\n"
-        L"%s\n\n"
-        L"????????????????????????????????????????\n\n"
-        L"?? Changez la qualité avec les touches 1-5 :\n\n"
-        L"[1] Très Faible - Performance maximale\n"
-        L"    • Pas d'effets visuels\n"
-        L"    • Pas de particules\n"
-        L"    • Fond statique\n\n"
-        L"[2] Faible - Bon pour PC anciens\n"
-        L"    • Particules réduites (15)\n"
-        L"    • Effets minimaux\n\n"
-        L"[3] Moyen - Équilibré ? (Recommandé)\n"
-        L"    • Particules (30)\n"
-        L"    • Tous les effets activés\n"
-        L"    • Bon compromis\n\n"
-        L"[4] Élevé - Qualité supérieure\n"
-        L"    • Particules (40)\n"
-        L"    • Effets améliorés\n\n"
-        L"[5] Ultra - Maximum de détails\n"
-        L"    • Particules (50)\n"
-        L"    • Tous les effets au maximum\n\n"
-        L"????????????????????????????????????????\n\n"
-        L"?? Audio : %s\n"
-        L"?? Particules actuelles : %d\n"
-        L"? Animations : %s\n\n"
-        L"?? Appuyez sur M pour activer/désactiver l'audio\n"
-        L"?? La qualité s'applique immédiatement",
+        L"=== OPTIONS ===\n\n"
+        L"QUALITE GRAPHIQUE\n"
+        L"Actuel: %s\n\n"
+        L"Changez avec les touches 1-5:\n"
+        L"  [1] Tres Faible - Performance Max\n"
+        L"  [2] Faible - PC Anciens\n"
+        L"  [3] Moyen - Recommande\n"
+        L"  [4] Eleve - Qualite Sup.\n"
+        L"  [5] Ultra - Max Details\n\n"
+        L"AUDIO\n"
+        L"  Volume Musique: %d%%\n"
+        L"  Volume Effets: %d%%\n"
+        L"  Statut: %s\n\n"
+        L"RACCOURCIS:\n"
+        L"  [M] Activer/Desactiver audio\n"
+        L"  [+/-] Ajuster volume (bientot)\n\n"
+        L"RESOLUTION: 1920x1080 (Fixe)\n",
         GetQualityName(gameConfig.graphicsQuality),
-        QUALITY_PRESETS[gameConfig.graphicsQuality].description,
-        gameConfig.soundEnabled ? L"Activé ?" : L"Désactivé ?",
-        (int)menuParticles.size(),
-        gameConfig.animationsEnabled ? L"Activées ?" : L"Désactivées ?"
+        gameConfig.musicVolume,
+        gameConfig.sfxVolume,
+        gameConfig.soundEnabled ? L"Active" : L"Desactive"
     );
-    
-    MessageBox(hWndParent, message, L"?? Options - Qualité Graphique", MB_OK | MB_ICONINFORMATION);
+
+    MessageBox(hWndParent, message, L"Options", MB_OK | MB_ICONINFORMATION);
 }
 
 // ============================================
@@ -1176,6 +1166,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
+
+    // Initialiser les contrôles communs (nécessaire pour les sliders)
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_BAR_CLASSES; // Pour les trackbars (sliders)
+    InitCommonControlsEx(&icex);
 
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_DEMINEUR, szWindowClass, MAX_LOADSTRING);
@@ -1783,33 +1779,197 @@ void DrawMenuButton(HDC hdc, RECT button, const WCHAR* text, bool hovered) {
     // Couleur selon hover
     COLORREF color1 = hovered ? RGB(76, 175, 80) : RGB(52, 73, 94);
     COLORREF color2 = hovered ? RGB(56, 142, 60) : RGB(44, 62, 80);
-    
+
     DrawGradientRect(hdc, button, color1, color2, true);
-    
+
     // Bordure blanche
     HPEN pen = CreatePen(PS_SOLID, 3, RGB(255, 255, 255));
     SelectObject(hdc, pen);
     SelectObject(hdc, GetStockObject(NULL_BRUSH));
     RoundRect(hdc, button.left, button.top, button.right, button.bottom, 15, 15);
     DeleteObject(pen);
-    
+
     // Texte
     SetBkMode(hdc, TRANSPARENT);
     HFONT font = CreateFont(48, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
     SelectObject(hdc, font);
-    
+
     // Ombre
     RECT shadowRect = {button.left + 3, button.top + 3, button.right + 3, button.bottom + 3};
     SetTextColor(hdc, RGB(0, 0, 0));
     DrawText(hdc, text, -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    
+
     // Texte principal
     SetTextColor(hdc, RGB(255, 255, 255));
     DrawText(hdc, text, -1, &button, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    
+
     DeleteObject(font);
+}
+
+// Dessiner le menu de fin de partie
+void DrawGameOverMenu(HDC hdc, int width, int height) {
+    // Fond semi-transparent
+    HBRUSH overlayBrush = CreateSolidBrush(RGB(20, 20, 20));
+    RECT overlayRect = {0, 0, width, height};
+    FillRect(hdc, &overlayRect, overlayBrush);
+    DeleteObject(overlayBrush);
+
+    // Panneau central
+    int panelWidth = 600;
+    int panelHeight = 480;
+    int panelX = (width - panelWidth) / 2;
+    int panelY = (height - panelHeight) / 2;
+
+    RECT panelRect = {panelX, panelY, panelX + panelWidth, panelY + panelHeight};
+
+    // Fond du panneau avec d?grad?
+    DrawGradientRect(hdc, panelRect, RGB(50, 50, 50), RGB(80, 80, 80), true);
+
+    // Bordure du panneau
+    HPEN panelPen = CreatePen(PS_SOLID, 3, RGB(255, 255, 255));
+    SelectObject(hdc, panelPen);
+    SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 20, 20);
+    DeleteObject(panelPen);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Titre
+    HFONT titleFont = CreateFont(60, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, titleFont);
+
+    RECT titleRect = {panelX, panelY + 40, panelX + panelWidth, panelY + 120};
+
+    if (gameWon) {
+        // Ombre
+        SetTextColor(hdc, RGB(0, 100, 0));
+        RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
+        DrawText(hdc, L"? VICTOIRE !", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        SetTextColor(hdc, RGB(76, 175, 80));
+        DrawText(hdc, L"? VICTOIRE !", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    } else {
+        // Ombre
+        SetTextColor(hdc, RGB(100, 0, 0));
+        RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
+        DrawText(hdc, L"? GAME OVER", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        SetTextColor(hdc, RGB(244, 67, 54));
+        DrawText(hdc, L"? GAME OVER", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    DeleteObject(titleFont);
+
+    // Statistiques
+    HFONT statsFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, statsFont);
+
+    WCHAR statsText[256];
+    swprintf_s(statsText, L"Temps: %d secondes • Score: %d", elapsedSeconds, score);
+
+    RECT statsRect = {panelX, panelY + 140, panelX + panelWidth, panelY + 180};
+    SetTextColor(hdc, RGB(200, 200, 200));
+    DrawText(hdc, statsText, -1, &statsRect, DT_CENTER | DT_SINGLELINE);
+    DeleteObject(statsFont);
+
+    // Boutons
+    int buttonWidth = 250;
+    int buttonHeight = 60;
+    int buttonSpacing = 20;
+    int buttonsY = panelY + 200;
+
+    RECT replayButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY, 
+                         panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + buttonHeight};
+    RECT optionsButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + buttonHeight + buttonSpacing,
+                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 2 * buttonHeight + buttonSpacing};
+    RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 2 * (buttonHeight + buttonSpacing),
+                       panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 3 * buttonHeight + 2 * buttonSpacing};
+
+    DrawMenuButton(hdc, replayButton, L"?? REJOUER", false);
+    DrawMenuButton(hdc, optionsButton, L"? OPTIONS", false);
+    DrawMenuButton(hdc, menuButton, L"?? MENU", false);
+}
+
+// Dessiner le menu de pause
+void DrawPauseMenu(HDC hdc, int width, int height) {
+    // Fond semi-transparent
+    HBRUSH overlayBrush = CreateSolidBrush(RGB(20, 20, 20));
+    RECT overlayRect = {0, 0, width, height};
+    FillRect(hdc, &overlayRect, overlayBrush);
+    DeleteObject(overlayBrush);
+
+    // Panneau central
+    int panelWidth = 600;
+    int panelHeight = 530;
+    int panelX = (width - panelWidth) / 2;
+    int panelY = (height - panelHeight) / 2;
+
+    RECT panelRect = {panelX, panelY, panelX + panelWidth, panelY + panelHeight};
+
+    // Fond du panneau avec dégradé
+    DrawGradientRect(hdc, panelRect, RGB(50, 50, 50), RGB(80, 80, 80), true);
+
+    // Bordure du panneau
+    HPEN panelPen = CreatePen(PS_SOLID, 3, RGB(255, 255, 255));
+    SelectObject(hdc, panelPen);
+    SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 20, 20);
+    DeleteObject(panelPen);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Titre
+    HFONT titleFont = CreateFont(60, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, titleFont);
+
+    RECT titleRect = {panelX, panelY + 40, panelX + panelWidth, panelY + 120};
+
+    // Ombre
+    SetTextColor(hdc, RGB(100, 100, 0));
+    RECT shadowRect = {titleRect.left + 3, titleRect.top + 3, titleRect.right + 3, titleRect.bottom + 3};
+    DrawText(hdc, L"? PAUSE", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    SetTextColor(hdc, RGB(255, 255, 0));
+    DrawText(hdc, L"? PAUSE", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DeleteObject(titleFont);
+
+    // Sous-titre
+    HFONT subtitleFont = CreateFont(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+    SelectObject(hdc, subtitleFont);
+
+    RECT subtitleRect = {panelX, panelY + 130, panelX + panelWidth, panelY + 160};
+    SetTextColor(hdc, RGB(200, 200, 200));
+    DrawText(hdc, L"Appuyez sur ESC ou P pour reprendre", -1, &subtitleRect, DT_CENTER | DT_SINGLELINE);
+    DeleteObject(subtitleFont);
+
+    // Boutons
+    int buttonWidth = 250;
+    int buttonHeight = 60;
+    int buttonSpacing = 20;
+    int buttonsY = panelY + 180;
+
+    RECT resumeButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY, 
+                         panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + buttonHeight};
+    RECT restartButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + buttonHeight + buttonSpacing,
+                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 2 * buttonHeight + buttonSpacing};
+    RECT optionsButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 2 * (buttonHeight + buttonSpacing),
+                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 3 * buttonHeight + 2 * buttonSpacing};
+    RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 3 * (buttonHeight + buttonSpacing),
+                       panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 4 * buttonHeight + 3 * buttonSpacing};
+
+    DrawMenuButton(hdc, resumeButton, L"? REPRENDRE", false);
+    DrawMenuButton(hdc, restartButton, L"?? RECOMMENCER", false);
+    DrawMenuButton(hdc, optionsButton, L"? OPTIONS", false);
+    DrawMenuButton(hdc, menuButton, L"?? MENU", false);
 }
 
 void DrawMenu(HDC hdc, HWND hWnd) {
@@ -2289,11 +2449,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     ToggleAudio();
                     InvalidateRect(hWnd, NULL, FALSE);
                     break;
-                case VK_ESCAPE: // Retour au menu
-                    gameState = STATE_MENU;
-                    PlayBackgroundMusic(MUSIC_MENU); // ?? Musique du menu
-                    PlaySoundEffect(SFX_BUTTON_CLICK);
-                    InvalidateRect(hWnd, NULL, FALSE);
+                case VK_ESCAPE: // Menu pause / Retour au menu
+                    if (gameState == STATE_PLAYING) {
+                        if (gameOver) {
+                            // Si le jeu est terminé, retour au menu
+                            gameState = STATE_MENU;
+                            PlayBackgroundMusic(MUSIC_MENU);
+                            PlaySoundEffect(SFX_BUTTON_CLICK);
+                            InvalidateRect(hWnd, NULL, FALSE);
+                        } else {
+                            // Sinon, basculer la pause
+                            isPaused = !isPaused;
+                            PlaySoundEffect(SFX_BUTTON_CLICK);
+                            InvalidateRect(hWnd, NULL, FALSE);
+                        }
+                    }
                     break;
             }
         }
@@ -2350,11 +2520,126 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             
             // Si on est en jeu
             if (gameState == STATE_PLAYING) {
+                // Si le jeu est terminé, gérer les clics sur le menu de fin de partie
+                if (gameOver) {
+                    int panelWidth = 600;
+                    int panelHeight = 480;
+                    int panelX = (width - panelWidth) / 2;
+                    int panelY = (height - panelHeight) / 2;
+
+                    int buttonWidth = 250;
+                    int buttonHeight = 60;
+                    int buttonSpacing = 20;
+                    int buttonsY = panelY + 200;
+
+                    RECT replayButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY, 
+                                         panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + buttonHeight};
+                    RECT optionsButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + buttonHeight + buttonSpacing,
+                                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 2 * buttonHeight + buttonSpacing};
+                    RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 2 * (buttonHeight + buttonSpacing),
+                                       panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 3 * buttonHeight + 2 * buttonSpacing};
+
+                    // Clic sur REJOUER
+                    if (x >= replayButton.left && x <= replayButton.right &&
+                        y >= replayButton.top && y <= replayButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        InitializeGame(currentDifficulty);
+                        PlayBackgroundMusic(MUSIC_GAME);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    // Clic sur OPTIONS
+                    if (x >= optionsButton.left && x <= optionsButton.right &&
+                        y >= optionsButton.top && y <= optionsButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        ShowOptionsDialog(hWnd);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    // Clic sur MENU
+                    if (x >= menuButton.left && x <= menuButton.right &&
+                        y >= menuButton.top && y <= menuButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        gameState = STATE_MENU;
+                        PlayBackgroundMusic(MUSIC_MENU);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    break;
+                }
+
+                // Si le jeu est en pause, gérer les clics sur le menu de pause
+                if (isPaused) {
+                    int panelWidth = 600;
+                    int panelHeight = 530;
+                    int panelX = (width - panelWidth) / 2;
+                    int panelY = (height - panelHeight) / 2;
+
+                    int buttonWidth = 250;
+                    int buttonHeight = 60;
+                    int buttonSpacing = 20;
+                    int buttonsY = panelY + 180;
+
+                    RECT resumeButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY, 
+                                         panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + buttonHeight};
+                    RECT restartButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + buttonHeight + buttonSpacing,
+                                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 2 * buttonHeight + buttonSpacing};
+                    RECT optionsButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 2 * (buttonHeight + buttonSpacing),
+                                          panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 3 * buttonHeight + 2 * buttonSpacing};
+                    RECT menuButton = {panelX + (panelWidth - buttonWidth) / 2, buttonsY + 3 * (buttonHeight + buttonSpacing),
+                                       panelX + (panelWidth - buttonWidth) / 2 + buttonWidth, buttonsY + 4 * buttonHeight + 3 * buttonSpacing};
+
+                    // Clic sur REPRENDRE
+                    if (x >= resumeButton.left && x <= resumeButton.right &&
+                        y >= resumeButton.top && y <= resumeButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        isPaused = false;
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    // Clic sur RECOMMENCER
+                    if (x >= restartButton.left && x <= restartButton.right &&
+                        y >= restartButton.top && y <= restartButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        InitializeGame(currentDifficulty);
+                        isPaused = false;
+                        PlayBackgroundMusic(MUSIC_GAME);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    // Clic sur OPTIONS
+                    if (x >= optionsButton.left && x <= optionsButton.right &&
+                        y >= optionsButton.top && y <= optionsButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        ShowOptionsDialog(hWnd);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    // Clic sur MENU
+                    if (x >= menuButton.left && x <= menuButton.right &&
+                        y >= menuButton.top && y <= menuButton.bottom) {
+                        PlaySoundEffect(SFX_BUTTON_CLICK);
+                        gameState = STATE_MENU;
+                        isPaused = false;
+                        PlayBackgroundMusic(MUSIC_MENU);
+                        InvalidateRect(hWnd, NULL, FALSE);
+                        break;
+                    }
+
+                    break;
+                }
+
                 // Vérifier si clic sur bouton d'aide
                 int footerY = height - FOOTER_HEIGHT + 10;
                 RECT hintButtonRect = {MARGIN + 10, footerY, 
                                        MARGIN + 130, footerY + 60};
-                
+
                 if (x >= hintButtonRect.left && x <= hintButtonRect.right &&
                     y >= hintButtonRect.top && y <= hintButtonRect.bottom) {
                     if (!gameOver && hintsRemaining > 0) {
@@ -2364,14 +2649,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         // Son d'erreur si pas d'aide disponible
                         Beep(300, 100);
                     }
-                    break;
-                }
-                
-                if (gameOver) {
-                    PlaySoundEffect(SFX_BUTTON_CLICK);
-                    InitializeGame(currentDifficulty);
-                    PlayBackgroundMusic(MUSIC_GAME);
-                    InvalidateRect(hWnd, NULL, FALSE);
                     break;
                 }
                 
@@ -2525,29 +2802,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     // Si jeu pas commencé, juste le bouton d'aide
                     DrawHintButton(hdcMem, MARGIN + 10, footerY);
                 }
-                
-                // Indication de pause (plein écran)
+
+                // Menu de pause
                 if (isPaused) {
-                    SetBkMode(hdcMem, TRANSPARENT);
-                    HFONT font = CreateFont(60, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
-                    SelectObject(hdcMem, font);
-                    
-                    RECT pauseRect = clientRect;
-                    
-                    // Ombre
-                    RECT shadowRect = {pauseRect.left + 4, pauseRect.top + 4, 
-                                     pauseRect.right + 4, pauseRect.bottom + 4};
-                    SetTextColor(hdcMem, RGB(0, 0, 0));
-                    DrawText(hdcMem, L"? PAUSE", -1, &shadowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    
-                    SetTextColor(hdcMem, RGB(255, 255, 0));
-                    DrawText(hdcMem, L"? PAUSE", -1, &pauseRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    
-                    DeleteObject(font);
+                    DrawPauseMenu(hdcMem, clientRect.right, clientRect.bottom);
                 }
-                
+
                 // Instructions en bas du footer (si pas commencé)
                 if (!gameStarted) {
                     SetBkMode(hdcMem, TRANSPARENT);
@@ -2584,8 +2844,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     DrawText(hdcMem, L"?? OFF", -1, &audioRect, DT_CENTER | DT_SINGLELINE);
                 }
                 DeleteObject(audioFont);
+
+                // Afficher le menu de fin de partie si le jeu est termin?
+                if (gameOver) {
+                    DrawGameOverMenu(hdcMem, clientRect.right, clientRect.bottom);
+                }
             }
-            
+
             BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, hdcMem, 0, 0, SRCCOPY);
             
             SelectObject(hdcMem, hbmOld);
